@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>AOI System</title>
+
+<style>
+body { margin:0; background:#020617; color:white; font-family:Arial;}
+.header {height:60px;background:#0f172a;display:flex;justify-content:space-between;align-items:center;padding:0 20px;}
+.container {display:flex;height:calc(100vh - 60px);}
+.left {width:75%;background:black;display:flex;align-items:center;justify-content:center;}
+.left img {max-width:100%;}
+.right {width:25%;padding:15px;background:#020617;}
+.card {background:#0f172a;padding:15px;margin-bottom:15px;border-radius:10px;}
+
+button {
+    width:100%;
+    padding:10px;
+    margin-top:10px;
+    background:#1e293b;
+    color:white;
+    border:none;
+    border-radius:5px;
+    cursor:pointer;
+}
+
+button:hover { background:#334155; }
+
+.alert {
+    color:red;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+    <h2>PCB AOI System</h2>
+    <div id="fps">FPS: --</div>
+</div>
+
+<div class="container">
+
+<div class="left">
+    <img src="/video">
+</div>
+
+<div class="right">
+
+<div class="card">
+<h3>Defect Stats</h3>
+<div id="stats"></div>
+<div id="alert"></div>
+</div>
+
+<div class="card">
+<h3>Control Panel</h3>
+<button onclick="start()">Start</button>
+<button onclick="stop()">Stop</button>
+<button onclick="toggleHeat()">Toggle Heatmap</button>
+</div>
+
+</div>
+
+</div>
+
+<script>
+
+let heat = true
+
+async function updateStats(){
+    const res = await fetch('/stats')
+    const data = await res.json()
+
+    let html = ""
+    let total = 0
+
+    for(let k in data){
+        html += `${k}: ${data[k]}<br>`
+        total += data[k]
+    }
+
+    document.getElementById("stats").innerHTML = html
+
+    if(total > 0){
+        document.getElementById("alert").innerHTML = "⚠ NG DETECTED"
+    }else{
+        document.getElementById("alert").innerHTML = ""
+    }
+}
+
+async function updateStatus(){
+    const res = await fetch('/status')
+    const data = await res.json()
+    document.getElementById("fps").innerText = "FPS: " + data.fps
+}
+
+function start(){
+    fetch('/control',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({run:true})
+    })
+}
+
+function stop(){
+    fetch('/control',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({run:false})
+    })
+}
+
+function toggleHeat(){
+    heat = !heat
+    fetch('/control',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({heatmap:heat})
+    })
+}
+
+setInterval(updateStats,500)
+setInterval(updateStatus,500)
+
+</script>
+
+</body>
+</html>
