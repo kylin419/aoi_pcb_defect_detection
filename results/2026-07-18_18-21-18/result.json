@@ -1,0 +1,33 @@
+{
+    "detections": [
+        {
+            "box": [
+                255,
+                147,
+                265,
+                160
+            ],
+            "score": 0.31742578744888306,
+            "label": "short"
+        },
+        {
+            "box": [
+                124,
+                140,
+                135,
+                154
+            ],
+            "score": 0.3040419816970825,
+            "label": "short"
+        }
+    ],
+    "stats": {
+        "missing_hole": 0,
+        "mouse_bite": 0,
+        "open_circuit": 0,
+        "short": 2,
+        "spur": 0,
+        "spurious_copper": 0
+    },
+    "inference_ms": 66.01327899988974
+}

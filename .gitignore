@@ -1,0 +1,43 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ROS 2 / Colcon build artifacts
+install/
+log/
+COLCON_IGNORE
+
+# Diagnostic and application logs
+*.log
+
+# Backup / scratch files
+*.b64
+*.bak
+*.tmp
+*~
+
+# Environment & IDE
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,263 @@
+/* ============================================================
+   AOI PCB Inspection Theme
+   ============================================================ */
+
+/* ---------- Global ---------- */
+
+* {
+    font-family: "Segoe UI", "Microsoft JhengHei";
+    font-size: 10pt;
+    color: #ECECEC;
+}
+
+QMainWindow {
+    background: #181A1F;
+}
+
+QWidget {
+    background: #181A1F;
+}
+
+
+/* ---------- Frame / Panel ---------- */
+
+QFrame {
+    background: #20242B;
+    border: 1px solid #31363F;
+    border-radius: 10px;
+}
+
+
+/* ---------- GroupBox ---------- */
+
+QGroupBox {
+    background: #20242B;
+    border: 1px solid #31363F;
+    border-radius: 10px;
+
+    margin-top: 12px;
+    padding-top: 8px;
+
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0px 6px;
+}
+
+
+/* ---------- Push Button ---------- */
+
+QPushButton {
+
+    background: #2B313A;
+
+    border: 1px solid #3B4048;
+
+    border-radius: 8px;
+
+    padding: 8px 16px;
+
+    min-height: 30px;
+}
+
+QPushButton:hover {
+
+    background: #343B45;
+
+    border: 1px solid #00D084;
+}
+
+QPushButton:pressed {
+
+    background: #1F232A;
+}
+
+
+/* ---------- Primary Button ---------- */
+
+QPushButton#primary {
+
+    background: #00C853;
+
+    color: white;
+
+    border: none;
+}
+
+QPushButton#primary:hover {
+
+    background: #14E87B;
+}
+
+QPushButton#primary:pressed {
+
+    background: #00A84A;
+}
+
+
+/* ---------- Label ---------- */
+
+QLabel {
+
+    background: transparent;
+}
+
+QLabel#title {
+
+    font-size: 18pt;
+
+    font-weight: bold;
+}
+
+QLabel#subtitle {
+
+    color: #A8AFB8;
+}
+
+
+/* ---------- LineEdit ---------- */
+
+QLineEdit {
+
+    background: #252B33;
+
+    border: 1px solid #3B4048;
+
+    border-radius: 6px;
+
+    padding: 6px;
+}
+
+QLineEdit:focus {
+
+    border: 1px solid #00D084;
+}
+
+
+/* ---------- ComboBox ---------- */
+
+QComboBox {
+
+    background: #252B33;
+
+    border: 1px solid #3B4048;
+
+    border-radius: 6px;
+
+    padding: 5px 10px;
+}
+
+QComboBox:hover {
+
+    border: 1px solid #00D084;
+}
+
+QComboBox::drop-down {
+
+    border: none;
+
+    width: 25px;
+}
+
+
+/* ---------- SpinBox ---------- */
+
+QSpinBox,
+QDoubleSpinBox {
+
+    background: #252B33;
+
+    border: 1px solid #3B4048;
+
+    border-radius: 6px;
+
+    padding: 4px;
+}
+
+
+/* ---------- ScrollBar ---------- */
+
+QScrollBar:vertical {
+
+    background: transparent;
+
+    width: 10px;
+
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+
+    background: #4C5562;
+
+    border-radius: 5px;
+
+    min-height: 25px;
+}
+
+QScrollBar::handle:vertical:hover {
+
+    background: #00D084;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+
+    height: 0px;
+}
+
+
+/* ---------- TextEdit ---------- */
+
+QTextEdit {
+
+    background: #1C2026;
+
+    border: 1px solid #31363F;
+
+    border-radius: 8px;
+
+    selection-background-color: #00D084;
+}
+
+
+/* ---------- StatusBar ---------- */
+
+QStatusBar {
+
+    background: #20242B;
+
+    border-top: 1px solid #31363F;
+}
+
+
+/* ---------- Splitter ---------- */
+
+QSplitter::handle {
+
+    background: #31363F;
+}
+
+QSplitter::handle:hover {
+
+    background: #00D084;
+}
+
+
+/* ---------- ToolTip ---------- */
+
+QToolTip {
+
+    background: #2A2F38;
+
+    color: white;
+
+    border: 1px solid #00D084;
+
+    padding: 5px;
+
+    border-radius: 6px;
+}
