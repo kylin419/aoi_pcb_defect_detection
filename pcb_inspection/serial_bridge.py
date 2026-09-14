@@ -18,6 +18,7 @@ class ArduinoBridge:
     """
     Serial Bridge handler connecting Jetson Orin Nano with Arduino Due.
     Communicates over UART/USB Serial (115200 baud).
+    Includes industrial Fail-Safe Heartbeat sender thread.
     """
 
     def __init__(
@@ -35,6 +36,7 @@ class ArduinoBridge:
         self.ser: Optional[serial.Serial] = None
         self.running = False
         self.read_thread: Optional[threading.Thread] = None
+        self.heartbeat_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
     def find_arduino_port(self) -> Optional[str]:
@@ -61,12 +63,23 @@ class ArduinoBridge:
             )
             time.sleep(2.0)  # Wait for Arduino Due bootloader reset
             self.running = True
+
+            # Start reading thread
             self.read_thread = threading.Thread(
                 target=self._read_loop,
                 name="Arduino-Serial-Reader",
                 daemon=True,
             )
             self.read_thread.start()
+
+            # Start industrial heartbeat thread (1.5s interval)
+            self.heartbeat_thread = threading.Thread(
+                target=self._heartbeat_loop,
+                name="Arduino-Heartbeat-Sender",
+                daemon=True,
+            )
+            self.heartbeat_thread.start()
+
             logger.info(f"Connected to Arduino Due on {port_to_open} at {self.baudrate} baud.")
             return True
 
@@ -86,7 +99,8 @@ class ArduinoBridge:
                 msg = f"{cmd.strip()}\n"
                 self.ser.write(msg.encode("utf-8"))
                 self.ser.flush()
-                logger.info(f"Sent command to Arduino: '{cmd}'")
+                if cmd != "PING":
+                    logger.info(f"Sent command to Arduino: '{cmd}'")
                 return True
             except Exception as e:
                 logger.error(f"Error sending command '{cmd}': {e}")
@@ -112,6 +126,16 @@ class ArduinoBridge:
         """Send RESET command to Arduino Due."""
         return self.send_command("RESET")
 
+    def read_ir_status(self) -> bool:
+        """Query real-time IR sensor state from Arduino Due."""
+        return self.send_command("READ_IR")
+
+    def _heartbeat_loop(self):
+        """Industrial Fail-Safe Heartbeat sender: Send PING to Arduino Due every 1.5s."""
+        while self.running and self.ser and self.ser.is_open:
+            time.sleep(1.5)
+            self.send_command("PING")
+
     def _read_loop(self):
         """Background thread reading incoming serial lines from Arduino Due."""
         while self.running and self.ser and self.ser.is_open:
@@ -120,7 +144,8 @@ class ArduinoBridge:
                 if not line:
                     continue
 
-                logger.info(f"Received from Arduino: '{line}'")
+                if line != "PONG":
+                    logger.info(f"Received from Arduino: '{line}'")
 
                 # Handle trigger from PCB arrival sensor
                 if line == "TRIGGER" or "TRIGGER" in line:
@@ -128,7 +153,7 @@ class ArduinoBridge:
                         self.trigger_callback()
 
                 # Dispatch feedback callback
-                if self.feedback_callback:
+                if self.feedback_callback and line != "PONG":
                     self.feedback_callback(line)
 
             except Exception as e:
