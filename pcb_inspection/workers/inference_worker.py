@@ -10,6 +10,7 @@ from ..detector import TensorRTDetector
 from ..result_manager import ResultManager
 from ..visualization import draw_detections
 from ..ros.publisher import AoiRosNode
+from ..serial_bridge import ArduinoBridge
 from ..config import (
     AUTO_SAVE_NG,
     CONFIDENCE_THRESHOLD,
@@ -75,6 +76,7 @@ class InferenceWorker(QObject):
         self.camera = None
         self.detector = None
         self.ros_node = None
+        self.serial_bridge = None
         self.timer = None
 
         self.running = False
@@ -101,7 +103,7 @@ class InferenceWorker(QObject):
 
     @pyqtSlot()
     def initialize(self):
-        """Initialize camera, TensorRT engine, and ROS 2 node."""
+        """Initialize camera, TensorRT engine, ROS 2 node, and Arduino Due serial bridge."""
         try:
             self.log.emit("Initializing Camera...")
             self.camera = Camera()
@@ -116,6 +118,18 @@ class InferenceWorker(QObject):
             self.ros_node = AoiRosNode()
             self.ros_node.set_command_callback(self._on_ros_command)
             self.log.emit("ROS 2 Interface Ready.")
+
+            self.log.emit("Connecting to Arduino Due Serial Bridge...")
+            self.serial_bridge = ArduinoBridge(
+                trigger_callback=lambda: QMetaObject.invokeMethod(
+                    self, "trigger", Qt.ConnectionType.QueuedConnection
+                ),
+                feedback_callback=lambda msg: self.log.emit(f"Arduino: {msg}"),
+            )
+            if self.serial_bridge.connect():
+                self.log.emit("Arduino Due Serial Bridge Connected.")
+            else:
+                self.log.emit("Arduino Due Serial Port not connected (Running in Standalone mode).")
 
             # Frame polling timer (checks at ~60 Hz for fresh frames)
             self.timer = QTimer(self)
@@ -250,6 +264,8 @@ class InferenceWorker(QObject):
 
         self.running = True
         self.fps_tracker.reset()
+        if self.serial_bridge:
+            self.serial_bridge.send_start()
         self.started.emit()
         self.log.emit("Continuous Defect Inspection Started.")
 
@@ -261,6 +277,8 @@ class InferenceWorker(QObject):
 
         self.running = False
         self.fps_tracker.reset()
+        if self.serial_bridge:
+            self.serial_bridge.send_stop()
         self.stopped.emit()
         self.log.emit("Continuous Inspection Paused (Live Camera Active).")
 
@@ -330,6 +348,13 @@ class InferenceWorker(QObject):
             self.last_frame = frame
             self.last_overlay = overlay
             self.last_result = result
+
+            # Send hardware result signal to Arduino Due (conveyor + diverter control)
+            if self.serial_bridge:
+                if result["ok"]:
+                    self.serial_bridge.send_ok()
+                else:
+                    self.serial_bridge.send_ng()
 
             # Publish to ROS 2 (throttled)
             if self.ros_node is not None:
@@ -414,6 +439,8 @@ class InferenceWorker(QObject):
         self.total_count = 0
         self.ok_count = 0
         self.ng_count = 0
+        if self.serial_bridge:
+            self.serial_bridge.send_reset()
         self.log.emit("Production yield statistics reset.")
         if self.last_result:
             self.dashboard_ready.emit(self._build_dashboard(0.0, self.last_result))
@@ -442,6 +469,9 @@ class InferenceWorker(QObject):
 
             if self.camera:
                 self.camera.release()
+
+            if self.serial_bridge:
+                self.serial_bridge.disconnect()
 
             if self.ros_node:
                 self.ros_node.close()

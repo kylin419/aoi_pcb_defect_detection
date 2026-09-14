@@ -62,6 +62,15 @@ ROS_TOPIC_INSPECTION_RESULT = "/aoi/inspection_result"
 ROS_TOPIC_STATUS = "/aoi/status"
 ROS_TOPIC_COMMAND = "/aoi/command"
 
+# Serial Bridge Topics (matching System Architecture specification)
+ROS_TOPIC_SERIAL_CONTROL = "/serial/control"
+ROS_TOPIC_BRIDGE_FEEDBACK = "/bridge/feedback"
+
 ROS_PUBLISH_RAW_IMAGE = True
 ROS_PUBLISH_ANNOTATED_IMAGE = True
 ROS_PUBLISH_MAX_FPS = 15.0
+
+# Hardware Serial Port Configuration (Arduino Due USB/UART)
+SERIAL_PORT = "/dev/ttyACM0"
+SERIAL_BAUD = 115200
+ENABLE_SERIAL_BRIDGE = True
