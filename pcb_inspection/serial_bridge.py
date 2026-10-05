@@ -121,7 +121,10 @@ class ArduinoBridge:
     def send_stop(self) -> bool:
         """Send STOP conveyor command to Arduino Due."""
         return self.send_command("STOP")
+    def send_ready(self)->bool:
+        return self.send_command("PCB_READY")
 
+    
     def send_reset(self) -> bool:
         """Send RESET command to Arduino Due."""
         return self.send_command("RESET")

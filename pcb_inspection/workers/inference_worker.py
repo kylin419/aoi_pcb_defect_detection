@@ -17,7 +17,7 @@ from ..config import (
     IOU_THRESHOLD,
     CLASSES,
 )
-
+from .localizer import pcb_green_area_detection
 
 class FpsTracker:
     """Windowed moving average FPS tracker for stable, accurate FPS measurement."""
@@ -80,9 +80,15 @@ class InferenceWorker(QObject):
         self.timer = None
 
         self.running = False
+        
         self.initialized = False
+        
         self.fps_tracker = FpsTracker(window_size=15)
         self._last_preview_dash_time = 0.0
+        # pcb state
+        self.pcb_stop_sent=False
+        self.inspect_waiting=False
+        self.pcb_present=False
 
         self.result_manager = ResultManager()
 
@@ -263,6 +269,10 @@ class InferenceWorker(QObject):
             return
 
         self.running = True
+        # Reset PCB inspection state
+        self.pcb_stop_sent=False
+        self.inspection_waiting=False
+        self.pcb_present=False
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_start()
@@ -276,6 +286,8 @@ class InferenceWorker(QObject):
             return
 
         self.running = False
+        self.pcb_stop_sent=False
+        self.inspect_waiting=False
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_stop()
@@ -301,7 +313,27 @@ class InferenceWorker(QObject):
 
             if not ret or frame is None:
                 return
-
+            # detect pcb and stop the motor
+            if self.running:
+                green_ratio=pcb_green_area_detection(frame)
+                if not self.pcb_present:
+                    if green_ratio>0.6:
+                        self.log.emit("PCB detected by camera.")
+                        if self.serial_bridge:
+                            success=self.serial_bridge.send_ready()
+                            if success:
+                                self.pcb_stop_sent=True
+                                self.inspect_waiting=True
+                                self.pcb_present=True
+                                self.log.emit("PCB detected. PCB_READY sent to Arduino.")
+                                return
+                            
+                else:
+                    if not self.inspect_waiting:
+                        if green_ratio<0.1:
+                            self.pcb_present=False
+                            self.log.emit("PCB left camera view. Ready for next PCB.")
+                    return
             # Avoid redundant processing if a new frame hasn't arrived yet
             if not is_trigger and not is_new:
                 return
@@ -355,6 +387,9 @@ class InferenceWorker(QObject):
                     self.serial_bridge.send_ok()
                 else:
                     self.serial_bridge.send_ng()
+            # Inspection finished
+            self.pcb_stop_sent=False
+            self.inspect_waiting=False        
 
             # Publish to ROS 2 (throttled)
             if self.ros_node is not None:

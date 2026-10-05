@@ -1,25 +1,7 @@
-/*
- * AOI PCB Defect Detection System - Arduino Due Industrial Controller
- * -------------------------------------------------------------------
- * 工業級邊緣運算 AOI PCB 瑕疵檢測系統 - Arduino Due 硬體控制器 (正式產線規律版)
- * 
- * 硬體平台: Arduino Due (Atmel SAM3X8E ARM Cortex-M3, 3.3V 邏輯準位)
- * 通訊介面: 雙序列埠支援 (Programming Port & Native USB Port, 115200 bps)
- * 
- * 工業級防護特色:
- * 1. A4988 步進馬達 (Stepper Motor) 脈衝與方向控制
- * 2. 雙向心跳包斷線保護 (Fail-Safe Heartbeat Protection - Jetson 當機/斷線自動防護停機)
- * 3. 預設安全判斷 (Default-to-NG Failsafe)
- * 4. PCB 鏡頭正中央定位與單張遲滯防重覆觸發機制 (Hysteresis Trigger)
- * 5. 分流機構 (OK/NG 伺服馬達 / 氣壓電磁閥)
- * 6. 三色警示燈 (Tower Light) 與蜂鳴器 (Buzzer) 控制
- */
-
 #include <Servo.h>
 
 // ==========================================
-// 硬體腳位定義 (Pin Definitions for Arduino Due)
-// 註: Arduino Due 邏輯準位為 3.3V！
+// Pin Definitions for Arduino Due
 // ==========================================
 
 // 感測器與按鈕腳位
@@ -63,9 +45,10 @@ const unsigned long DURATION_SORT_OK_MS     = 1500;  // OK 板通過時間
 const unsigned long DURATION_SORT_NG_MS     = 2000;  // NG 板推離時間
 const unsigned long DURATION_BUZZER_MS      = 300;   // NG 蜂鳴器響起時間
 
-// 🛡️【工業級 Fail-Safe 心跳包斷線保護】
 // 若在運轉中超過此時間未收到 Jetson 發送的心跳包，將自動強制停機防護 (預設 5000ms = 5秒)
 const unsigned long HEARTBEAT_TIMEOUT_MS    = 5000;  
+// 延遲時間（PCB置中用）
+const int DELAY_TIME=2000;
 
 // ==========================================
 // 系統狀態機枚舉 (State Machine Enums)
@@ -73,6 +56,7 @@ const unsigned long HEARTBEAT_TIMEOUT_MS    = 5000;
 enum SystemState {
   STATE_IDLE,             // 待機狀態 (Standby)
   STATE_CONVEYOR_RUNNING, // 輸送帶運轉中 (Scanning for PCB)
+  STATE_CENTERING,          // PCB 置中時狀態 (Centering PCB)
   STATE_WAIT_INSPECTION,  // PCB 到位停機，等待 Jetson 辨識結果 (Waiting for Jetson OK/NG)
   STATE_SORT_OK,          // 處置 OK 板 (OK Pass Through)
   STATE_SORT_NG,          // 處置 NG 板 (NG Divert / Eject)
@@ -274,6 +258,11 @@ void parseCommand(String cmd) {
     } else {
       sendSerialPrintln("INFO:IR_SENSOR_STATE:CLEAR (No PCB)");
     }
+  }else if(cmd=="PCB_READY"){
+    currentState=STATE_WAIT_INSPECTION;
+    stateTimer=millis();
+    setTowerLight(false,true,false);
+    sendSerialPrintln("STATUS:WAIT_INSPECTION");
   }
   else {
     sendSerialPrint("ERR:UNKNOWN_COMMAND:");
@@ -310,7 +299,7 @@ void runStateMachine() {
       stepMotorNonBlocking();
       setTowerLight(true, false, false);
 
-      // 2. 只要紅外線一遮擋，馬達立刻 100% 停止並切換黃燈！
+      // 2. 紅外線遮擋後，延遲兩秒讓PCB置中，進入等待辨識狀態
       if (digitalRead(PIN_IR_SENSOR) == IR_TRIGGER_STATE) {
         currentState = STATE_WAIT_INSPECTION;
         stateTimer = millis();
@@ -321,6 +310,20 @@ void runStateMachine() {
         sendSerialPrintln("TRIGGER");
         sendSerialPrintln("STATUS:WAIT_INSPECTION");
       }
+      break;
+
+    case STATE_CENTERING:
+     stepMotorNonBlocking();
+     setTowerLight(false, true, false); // 切換黃燈 (辨識中)
+     if(millis()-stateTimer>=DELAY_TIME){
+       currentState=STATE_WAIT_INSPECTION;
+       stateTimer=millis();
+       setTowerLight(false, true, false); // 切換黃燈 (辨識中)
+        sendSerialPrintln("INFO:PCB_CENTERING_COMPLETE");
+        sendSerialPrintln("INFO:STEPPER_MOTOR_STOPPED");
+        sendSerialPrintln("TRIGGER");
+        sendSerialPrintln("STATUS:WAIT_INSPECTION");
+     }
       break;
 
     case STATE_WAIT_INSPECTION:
