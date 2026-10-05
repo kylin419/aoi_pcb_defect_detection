@@ -41,3 +41,6 @@ COLCON_IGNORE
 .vscode/
 .idea/
 *.swp
+
+test3_files/
+*.jpeg
