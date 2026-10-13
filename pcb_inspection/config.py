@@ -39,6 +39,10 @@ CLASS_COLORS = {
     "spurious_copper": (200, 100, 255) # Light Pink/Violet
 }
 
+PCB_HSV_LOWER=(35,40,30)
+PCB_HSV_UPPER=(90,255,255)
+PCB_MIN_RATIO=0.1
+
 # Camera configurations
 CAMERA_SOURCE = "auto"  # 'auto', 'csi', 'usb', 'simulation'
 CAMERA_SENSOR_ID = 0
