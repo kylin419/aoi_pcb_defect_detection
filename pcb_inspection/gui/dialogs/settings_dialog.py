@@ -19,6 +19,7 @@ from ...config import (
     CAMERA_SOURCE,
     AUTO_SAVE_NG,
     PCB_CENTERING_DELAY_SEC,
+    PCB_DEFECT_DETECTION_DELAY_SEC,
     ROS_TOPIC_PCB_RESULT,
     ROS_TOPIC_INSPECTION_RESULT,
     ROS_TOPIC_COMMAND,
@@ -38,17 +39,19 @@ class SettingsDialog(QDialog):
         cam_source: str = CAMERA_SOURCE,
         auto_save_ng: bool = AUTO_SAVE_NG,
         centering_delay_sec: float = PCB_CENTERING_DELAY_SEC,
+        defect_detection_delay_sec: float = PCB_DEFECT_DETECTION_DELAY_SEC,
     ):
         super().__init__(parent)
 
         self.setWindowTitle("AOI System Settings")
-        self.resize(460, 520)
+        self.resize(460, 570)
 
         self.current_conf = conf_thresh
         self.current_iou = iou_thresh
         self.current_cam = cam_source
         self.current_auto_save = auto_save_ng
         self.current_centering_delay = centering_delay_sec
+        self.current_defect_detection_delay = defect_detection_delay_sec
 
         self.build_ui()
         self.load_values()
@@ -111,6 +114,19 @@ class SettingsDialog(QDialog):
         centering_box.addWidget(self.centering_spin)
         det_layout.addLayout(centering_box)
 
+        detection_delay_box = QHBoxLayout()
+        detection_delay_label = QLabel("Defect detection duration (sec):")
+        detection_delay_label.setFixedWidth(250)
+        self.detection_delay_spin = QDoubleSpinBox()
+        self.detection_delay_spin.setRange(0.0, 10.0)
+        self.detection_delay_spin.setSingleStep(0.5)
+        self.detection_delay_spin.setDecimals(1)
+        self.detection_delay_spin.setSuffix(" s")
+        self.detection_delay_spin.setToolTip("After the conveyor stops, inspect fresh camera frames for this long while keeping the live preview updated.")
+        detection_delay_box.addWidget(detection_delay_label)
+        detection_delay_box.addWidget(self.detection_delay_spin)
+        det_layout.addLayout(detection_delay_box)
+
         root.addWidget(det_group)
 
         # 2. Camera Group
@@ -167,6 +183,7 @@ class SettingsDialog(QDialog):
         self.iou_spin.setValue(self.current_iou)
         self.auto_save_box.setChecked(self.current_auto_save)
         self.centering_spin.setValue(self.current_centering_delay)
+        self.detection_delay_spin.setValue(self.current_defect_detection_delay)
 
         # Set combo
         idx = self.cam_combo.findData(self.current_cam)
@@ -180,6 +197,7 @@ class SettingsDialog(QDialog):
             "camera_source": self.cam_combo.currentData(),
             "auto_save_ng": self.auto_save_box.isChecked(),
             "centering_delay_sec": self.centering_spin.value(),
+            "defect_detection_delay_sec": self.detection_delay_spin.value(),
         }
 
     def on_apply(self):

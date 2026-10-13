@@ -78,6 +78,7 @@ class Dashboard(QWidget):
             "SEARCHING": ("搜尋 PCB 中", "輸送帶運轉中，鏡頭正在確認 PCB 是否進入畫面。", "#00D2FF"),
             "PCB_DETECTED": ("已偵測到 PCB", "正在通知 Arduino 停止輸送帶。", "#FFB300"),
             "STOP_CONFIRMED": ("輸送帶已停止", "Arduino 已完成置中運轉並確認停帶，準備開始辨識。", "#00D084"),
+            "DEFECT_DETECTION_WAIT": ("瑕疵檢測中", "輸送帶已停止；持續分析新影格並更新即時畫面，完成後送出最終檢測結果。", "#FFB300"),
             "CENTERING": ("PCB 置中運轉中", "輸送帶以較慢速度移動 PCB；到達設定時間後停帶並開始辨識。", "#FFB300"),
             "INSPECTING": ("瑕疵辨識中", "正在分析目前影格，請稍候。", "#FFB300"),
             "PASS": ("辨識完成：良品 OK", "瑕疵檢查通過，Arduino 已確認收到結果。", "#00D084"),

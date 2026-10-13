@@ -18,6 +18,7 @@ from ..config import (
     IOU_THRESHOLD,
     CLASSES,
     PCB_CENTERING_DELAY_SEC,
+    PCB_DEFECT_DETECTION_DELAY_SEC,
 )
 from .localizer import pcb_green_area_detection
 
@@ -87,6 +88,8 @@ class InferenceWorker(QObject):
         self.initialized = False
         self.camera_ready = False
         self.centering_delay_sec = PCB_CENTERING_DELAY_SEC
+        self.defect_detection_delay_sec = PCB_DEFECT_DETECTION_DELAY_SEC
+        self._defect_detection_deadline = None
         self._centering_active = False
         self._centering_deadline = None
         
@@ -287,6 +290,7 @@ class InferenceWorker(QObject):
         self.inspect_waiting=False
         self._centering_active=False
         self._centering_deadline=None
+        self._defect_detection_deadline = None
         self.pcb_present=False
         self._stop_fault=False
         self._ng_hold=False
@@ -310,6 +314,7 @@ class InferenceWorker(QObject):
         self.inspect_waiting=False
         self._centering_active=False
         self._centering_deadline=None
+        self._defect_detection_deadline = None
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_stop()
@@ -338,9 +343,10 @@ class InferenceWorker(QObject):
                     self._centering_active = False
                     self._centering_deadline = None
                     self.inspect_waiting = True
+                    self._defect_detection_deadline = time.monotonic() + self.defect_detection_delay_sec
                     centering_just_completed = True
-                    self.inspection_state.emit("STOP_CONFIRMED")
-                    self.log.emit("PCB centering completed; Arduino confirmed the conveyor stopped.")
+                    self.inspection_state.emit("DEFECT_DETECTION_WAIT")
+                    self.log.emit(f"Conveyor stopped; inspecting fresh camera frames for {self.defect_detection_delay_sec:.1f} seconds.")
                 elif self._centering_deadline is not None and time.monotonic() >= self._centering_deadline:
                     if self.serial_bridge:
                         self.serial_bridge.send_stop()
@@ -361,6 +367,32 @@ class InferenceWorker(QObject):
                     self.last_frame = frame
                     self.frame_ready.emit(frame)
                 return
+            # Inspect fresh frames from the stationary production line while
+            # keeping the GUI preview current for the configured duration.
+            if self.running and self.inspect_waiting and self._defect_detection_deadline is not None:
+                if not is_new:
+                    return
+                fps = self.fps_tracker.update()
+                if fps <= 0.0 and getattr(self.camera, "capture_fps", 0) > 0:
+                    fps = self.camera.capture_fps
+                if time.monotonic() < self._defect_detection_deadline:
+                    # Re-run defect detection on fresh frames during the
+                    # configured observation window and keep the GUI live.
+                    result = self.detector.detect(frame)
+                    overlay = draw_detections(
+                        frame,
+                        result["detections"],
+                        inference_ms=result["inference_ms"],
+                    )
+                    self.last_frame = frame
+                    self.last_overlay = overlay
+                    self.last_result = result
+                    self.frame_ready.emit(overlay)
+                    self.fps_ready.emit(fps)
+                    self.dashboard_ready.emit(self._build_dashboard(fps, result))
+                    return
+                self._defect_detection_deadline = None
+                self.log.emit("Defect detection window complete; finalizing the result from the latest frame.")
             if self.running and self._centering_active:
                 if is_new:
                     fps = self.fps_tracker.update()
@@ -578,6 +610,12 @@ class InferenceWorker(QObject):
         """Set the post-stop PCB centering delay, clamped to safe UI bounds."""
         self.centering_delay_sec = max(0.0, min(8.0, float(seconds)))
         self.log.emit(f"PCB centering delay set to {self.centering_delay_sec:.1f} seconds.")
+
+    @pyqtSlot(float)
+    def set_defect_detection_delay(self, seconds: float):
+        """Set how long to keep the stopped PCB preview before defect inference."""
+        self.defect_detection_delay_sec = max(0.0, min(10.0, float(seconds)))
+        self.log.emit(f"Defect detection window set to {self.defect_detection_delay_sec:.1f} seconds.")
 
     @pyqtSlot(str)
     def set_camera_source(self, source: str):

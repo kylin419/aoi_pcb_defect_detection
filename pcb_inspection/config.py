@@ -43,6 +43,7 @@ PCB_HSV_LOWER=(35,40,30)
 PCB_HSV_UPPER=(90,255,255)
 PCB_MIN_RATIO=0.1
 PCB_CENTERING_DELAY_SEC = 2.0  # Slow conveyor run time used to center the detected PCB
+PCB_DEFECT_DETECTION_DELAY_SEC = 3.0  # Live preview delay after the conveyor stops
 
 # Camera configurations
 CAMERA_SOURCE = "auto"  # 'auto', 'csi', 'usb', 'simulation'

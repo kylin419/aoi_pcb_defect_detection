@@ -32,7 +32,7 @@ const int SERVO_ANGLE_OK       = 0;   // OK 直行角度 (度)
 const int SERVO_ANGLE_NG       = 60;  // NG 偏轉/推送角度 (度)
 
 // 步進馬達速度與脈衝設定 (Stepper Motor Settings)
-const int STEPPER_PULSE_DELAY_US = 2000; // 延長脈衝週期以降低輸送帶速度
+const int STEPPER_PULSE_DELAY_US = 8000; // 延長脈衝週期以降低輸送帶速度
 
 // 動作計時器 (Timers in milliseconds)
 const unsigned long TIMEOUT_INSPECTION_MS   = 30000; // 包含置中等待與 Jetson 辨識的逾時上限 (30秒)
