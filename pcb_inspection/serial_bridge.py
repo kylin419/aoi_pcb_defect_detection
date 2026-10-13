@@ -37,6 +37,7 @@ class ArduinoBridge:
         self.heartbeat_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._ready_ack = threading.Event()
+        self._centering_ack = threading.Event()
         self._resume_ack = threading.Event()
         self._result_ack = {"OK": threading.Event(), "NG": threading.Event()}
 
@@ -145,6 +146,15 @@ class ArduinoBridge:
         self.send_stop()
         return False
 
+    def begin_centering(self, duration_ms: int) -> bool:
+        """Start a bounded centering move; the reader thread receives its stop acknowledgement."""
+        duration_ms = max(0, min(8000, int(duration_ms)))
+        self._centering_ack.clear()
+        return self.send_command(f"CENTER:{duration_ms}")
+
+    def centering_complete(self) -> bool:
+        return self._centering_ack.is_set()
+
     def send_ready(self, timeout: float = 1.5) -> bool:
         """Stop the conveyor and wait for Arduino's stopped-state acknowledgement."""
         self._ready_ack.clear()
@@ -183,6 +193,8 @@ class ArduinoBridge:
 
                 if line == "ACK:PCB_READY_STOPPED":
                     self._ready_ack.set()
+                elif line == "ACK:CENTERING_STOPPED":
+                    self._centering_ack.set()
                 elif line == "ACK:RESUME_RUNNING":
                     self._resume_ack.set()
                 elif line == "ACK:OK":

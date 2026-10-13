@@ -32,10 +32,11 @@ const int SERVO_ANGLE_OK       = 0;   // OK 直行角度 (度)
 const int SERVO_ANGLE_NG       = 60;  // NG 偏轉/推送角度 (度)
 
 // 步進馬達速度與脈衝設定 (Stepper Motor Settings)
-const int STEPPER_PULSE_DELAY_US = 1000; // 脈衝週期 (微秒, NEMA17 建議設定 800~1500us 避免失步抖動)
+const int STEPPER_PULSE_DELAY_US = 2000; // 延長脈衝週期以降低輸送帶速度
 
 // 動作計時器 (Timers in milliseconds)
-const unsigned long TIMEOUT_INSPECTION_MS   = 15000; // 等待 Jetson 辨識逾時 (15秒)
+const unsigned long TIMEOUT_INSPECTION_MS   = 30000; // 包含置中等待與 Jetson 辨識的逾時上限 (30秒)
+unsigned long centeringDurationMs = 2000;
 const unsigned long DURATION_SORT_OK_MS     = 1500;  // OK 板通過時間
 const unsigned long DURATION_BUZZER_MS      = 300;   // NG 蜂鳴器響起時間
 
@@ -48,6 +49,7 @@ const unsigned long HEARTBEAT_TIMEOUT_MS    = 5000;
 enum SystemState {
   STATE_IDLE,             // 待機狀態 (Standby)
   STATE_CONVEYOR_RUNNING, // 輸送帶運轉中 (Scanning for PCB)
+  STATE_CENTERING,        // 低速前進，將 PCB 移至鏡頭置中位置
   STATE_WAIT_INSPECTION,  // PCB 到位停機，等待 Jetson 辨識結果 (Waiting for Jetson OK/NG)
   STATE_SORT_OK,          // 處置 OK 板 (OK Pass Through)
   STATE_SORT_NG,          // 處置 NG 板 (NG Divert / Eject)
@@ -243,6 +245,15 @@ void parseCommand(String cmd) {
   else if (cmd == "PING" || cmd == "HEARTBEAT") {
     sendSerialPrintln("PONG");
   }
+  else if (cmd.startsWith("CENTER:") || cmd.startsWith("CMD:CENTER:")) {
+    int valueStart = cmd.startsWith("CMD:CENTER:") ? 11 : 7;
+    long requestedMs = cmd.substring(valueStart).toInt();
+    centeringDurationMs = (unsigned long)constrain(requestedMs, 0L, 8000L);
+    stateTimer = millis();
+    currentState = STATE_CENTERING;
+    setTowerLight(false, true, false);
+    sendSerialPrintln("STATUS:CENTERING");
+  }
   else if (cmd == "PCB_READY" || cmd == "CMD:PCB_READY") {
     currentState = STATE_WAIT_INSPECTION;
     stateTimer = millis();
@@ -274,7 +285,7 @@ void parseCommand(String cmd) {
 // ==========================================
 void checkHeartbeatSafety() {
   // 僅在運轉中進行斷線心跳包檢測
-  if (currentState == STATE_CONVEYOR_RUNNING || currentState == STATE_WAIT_INSPECTION) {
+  if (currentState == STATE_CONVEYOR_RUNNING || currentState == STATE_CENTERING || currentState == STATE_WAIT_INSPECTION) {
     if (millis() - lastHeartbeatTime > HEARTBEAT_TIMEOUT_MS) {
       sendSerialPrintln("ALARM:JETSON_COMMUNICATION_LOST_FAILSAFE_STOP");
       emergencyStop();
@@ -298,6 +309,18 @@ void runStateMachine() {
       stepMotorNonBlocking();
       setTowerLight(true, false, false);
 
+      break;
+
+    case STATE_CENTERING:
+      setTowerLight(false, true, false);
+      if (millis() - stateTimer >= centeringDurationMs) {
+        currentState = STATE_WAIT_INSPECTION;
+        stateTimer = millis();
+        sendSerialPrintln("ACK:CENTERING_STOPPED");
+        sendSerialPrintln("STATUS:WAIT_INSPECTION");
+      } else {
+        stepMotorNonBlocking();
+      }
       break;
 
     case STATE_WAIT_INSPECTION:

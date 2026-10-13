@@ -17,6 +17,7 @@ from ..config import (
     CONFIDENCE_THRESHOLD,
     IOU_THRESHOLD,
     CLASSES,
+    PCB_CENTERING_DELAY_SEC,
 )
 from .localizer import pcb_green_area_detection
 
@@ -85,11 +86,13 @@ class InferenceWorker(QObject):
         
         self.initialized = False
         self.camera_ready = False
+        self.centering_delay_sec = PCB_CENTERING_DELAY_SEC
+        self._centering_active = False
+        self._centering_deadline = None
         
         self.fps_tracker = FpsTracker(window_size=15)
         self._last_preview_dash_time = 0.0
         # pcb state
-        self.pcb_stop_sent=False
         self.inspect_waiting=False
         self.pcb_present=False
         self._stop_fault=False
@@ -281,8 +284,9 @@ class InferenceWorker(QObject):
 
         self.running = True
         # Reset PCB inspection state
-        self.pcb_stop_sent=False
         self.inspect_waiting=False
+        self._centering_active=False
+        self._centering_deadline=None
         self.pcb_present=False
         self._stop_fault=False
         self._ng_hold=False
@@ -303,8 +307,9 @@ class InferenceWorker(QObject):
             return
 
         self.running = False
-        self.pcb_stop_sent=False
         self.inspect_waiting=False
+        self._centering_active=False
+        self._centering_deadline=None
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_stop()
@@ -327,10 +332,41 @@ class InferenceWorker(QObject):
             return
 
         try:
+            centering_just_completed = False
+            if self.running and self._centering_active:
+                if self.serial_bridge and self.serial_bridge.centering_complete():
+                    self._centering_active = False
+                    self._centering_deadline = None
+                    self.inspect_waiting = True
+                    centering_just_completed = True
+                    self.inspection_state.emit("STOP_CONFIRMED")
+                    self.log.emit("PCB centering completed; Arduino confirmed the conveyor stopped.")
+                elif self._centering_deadline is not None and time.monotonic() >= self._centering_deadline:
+                    if self.serial_bridge:
+                        self.serial_bridge.send_stop()
+                    self._centering_active = False
+                    self._centering_deadline = None
+                    self._stop_fault = True
+                    self.inspection_state.emit("STOP_UNCONFIRMED")
+                    self.log.emit("Centering timed out without Arduino stop confirmation; STOP was issued as a safety measure.")
+                    return
+
             # Query the freshest frame from camera capture thread
             ret, frame, is_new = self.camera.get_latest_frame()
 
             if not ret or frame is None:
+                return
+            if centering_just_completed:
+                if is_new:
+                    self.last_frame = frame
+                    self.frame_ready.emit(frame)
+                return
+            if self.running and self._centering_active:
+                if is_new:
+                    fps = self.fps_tracker.update()
+                    self.last_frame = frame
+                    self.frame_ready.emit(frame)
+                    self.fps_ready.emit(fps)
                 return
             # Camera is the sole automatic PCB arrival source. A 3-of-5 vote
             # rejects isolated green frames while admitting partly visible boards.
@@ -339,17 +375,17 @@ class InferenceWorker(QObject):
                 if not self.pcb_present:
                     self._pcb_detection_votes.append(green_ratio >= 0.08)
                     if sum(self._pcb_detection_votes) >= 3:
-                        self.inspection_state.emit("PCB_DETECTED")
+                        self.inspection_state.emit("CENTERING")
                         self.log.emit(f"PCB detected by camera (green area {green_ratio:.3f}).")
-                        if self.serial_bridge and self.serial_bridge.send_ready():
-                            self.pcb_stop_sent = True
-                            self.inspect_waiting = True
+                        centering_ms = round(self.centering_delay_sec * 1000)
+                        if self.serial_bridge and self.serial_bridge.begin_centering(centering_ms):
+                            self._centering_active = True
+                            self._centering_deadline = time.monotonic() + self.centering_delay_sec + 2.0
                             self.pcb_present = True
                             self._pcb_detection_votes.clear()
                             self.last_frame = frame
                             self.frame_ready.emit(frame)
-                            self.inspection_state.emit("STOP_CONFIRMED")
-                            self.log.emit("Arduino confirmed conveyor stopped; starting defect inspection.")
+                            self.log.emit(f"PCB centering started; conveyor will move slowly for {self.centering_delay_sec:.1f} seconds.")
                             return
                         elif self.serial_bridge:
                             self.pcb_present = True
@@ -365,8 +401,10 @@ class InferenceWorker(QObject):
                                 self._ng_removed_at = time.monotonic()
                                 self.inspection_state.emit("NG_RESUME_DELAY")
                         else:
+                            was_in_resume_delay = self._ng_removed_at is not None
                             self._ng_removed_at = None
-                            self.inspection_state.emit("NG_WAIT_REMOVE")
+                            if was_in_resume_delay:
+                                self.inspection_state.emit("NG_WAIT_REMOVE")
                     elif green_ratio < 0.025:
                         self.pcb_present = False
                         self._pcb_detection_votes.clear()
@@ -469,7 +507,6 @@ class InferenceWorker(QObject):
                 if not result_acknowledged:
                     self.log.emit("Arduino did not acknowledge the inspection result; check controller state and serial connection.")
             # Inspection finished
-            self.pcb_stop_sent=False
             self.inspect_waiting=False        
             self._ng_hold = not result["ok"] and result_acknowledged
             self._ng_removed_at = None
@@ -536,6 +573,12 @@ class InferenceWorker(QObject):
             self.detector.set_thresholds(confidence, iou)
             self.log.emit(f"Updated thresholds: Conf={confidence:.2f}, IoU={iou:.2f}")
 
+    @pyqtSlot(float)
+    def set_centering_delay(self, seconds: float):
+        """Set the post-stop PCB centering delay, clamped to safe UI bounds."""
+        self.centering_delay_sec = max(0.0, min(8.0, float(seconds)))
+        self.log.emit(f"PCB centering delay set to {self.centering_delay_sec:.1f} seconds.")
+
     @pyqtSlot(str)
     def set_camera_source(self, source: str):
         """Switch camera input source."""
@@ -544,6 +587,7 @@ class InferenceWorker(QObject):
             if was_running:
                 self.stop()
             success, mode, msg = self.camera.open(source)
+            self.camera_ready = success
             self.fps_tracker.reset()
             self.log.emit(f"Camera switched to [{mode}]: {msg}")
             self.status_ready.emit({

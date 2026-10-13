@@ -59,6 +59,7 @@ class StatusBarWidget(QStatusBar):
             "SEARCHING": ("搜尋 PCB", "#00D2FF"),
             "PCB_DETECTED": ("已偵測 PCB", "#FFB300"),
             "STOP_CONFIRMED": ("已停帶", "#00D084"),
+            "CENTERING": ("PCB置中運轉", "#FFB300"),
             "INSPECTING": ("辨識中", "#FFB300"),
             "PASS": ("良品 OK", "#00D084"),
             "FAIL": ("瑕疵 NG", "#FF5555"),

@@ -18,6 +18,7 @@ from ...config import (
     IOU_THRESHOLD,
     CAMERA_SOURCE,
     AUTO_SAVE_NG,
+    PCB_CENTERING_DELAY_SEC,
     ROS_TOPIC_PCB_RESULT,
     ROS_TOPIC_INSPECTION_RESULT,
     ROS_TOPIC_COMMAND,
@@ -36,16 +37,18 @@ class SettingsDialog(QDialog):
         iou_thresh: float = IOU_THRESHOLD,
         cam_source: str = CAMERA_SOURCE,
         auto_save_ng: bool = AUTO_SAVE_NG,
+        centering_delay_sec: float = PCB_CENTERING_DELAY_SEC,
     ):
         super().__init__(parent)
 
         self.setWindowTitle("AOI System Settings")
-        self.resize(460, 480)
+        self.resize(460, 520)
 
         self.current_conf = conf_thresh
         self.current_iou = iou_thresh
         self.current_cam = cam_source
         self.current_auto_save = auto_save_ng
+        self.current_centering_delay = centering_delay_sec
 
         self.build_ui()
         self.load_values()
@@ -94,6 +97,19 @@ class SettingsDialog(QDialog):
         # Auto Save NG
         self.auto_save_box = QCheckBox("Automatically save defect images and JSON on NG")
         det_layout.addWidget(self.auto_save_box)
+
+        centering_box = QHBoxLayout()
+        centering_label = QLabel("PCB centering run time (sec):")
+        centering_label.setFixedWidth(250)
+        self.centering_spin = QDoubleSpinBox()
+        self.centering_spin.setRange(0.0, 8.0)
+        self.centering_spin.setSingleStep(0.5)
+        self.centering_spin.setDecimals(1)
+        self.centering_spin.setSuffix(" s")
+        self.centering_spin.setToolTip("After the camera detects a PCB, run the conveyor slowly for this long to center it, then stop for inspection.")
+        centering_box.addWidget(centering_label)
+        centering_box.addWidget(self.centering_spin)
+        det_layout.addLayout(centering_box)
 
         root.addWidget(det_group)
 
@@ -150,6 +166,7 @@ class SettingsDialog(QDialog):
         self.conf_spin.setValue(self.current_conf)
         self.iou_spin.setValue(self.current_iou)
         self.auto_save_box.setChecked(self.current_auto_save)
+        self.centering_spin.setValue(self.current_centering_delay)
 
         # Set combo
         idx = self.cam_combo.findData(self.current_cam)
@@ -162,6 +179,7 @@ class SettingsDialog(QDialog):
             "iou": self.iou_spin.value(),
             "camera_source": self.cam_combo.currentData(),
             "auto_save_ng": self.auto_save_box.isChecked(),
+            "centering_delay_sec": self.centering_spin.value(),
         }
 
     def on_apply(self):

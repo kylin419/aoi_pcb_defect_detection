@@ -21,6 +21,7 @@ from ..config import (
     IOU_THRESHOLD,
     CAMERA_SOURCE,
     AUTO_SAVE_NG,
+    PCB_CENTERING_DELAY_SEC,
 )
 
 
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         self.iou_threshold = IOU_THRESHOLD
         self.camera_source = CAMERA_SOURCE
         self.auto_save_ng = AUTO_SAVE_NG
+        self.centering_delay_sec = PCB_CENTERING_DELAY_SEC
 
         self.build_ui()
         self.build_worker()
@@ -181,6 +183,7 @@ class MainWindow(QMainWindow):
             iou_thresh=self.iou_threshold,
             cam_source=self.camera_source,
             auto_save_ng=self.auto_save_ng,
+            centering_delay_sec=self.centering_delay_sec,
         )
         dlg.settings_applied.connect(self.apply_settings)
         dlg.exec()
@@ -190,11 +193,13 @@ class MainWindow(QMainWindow):
         self.iou_threshold = data.get("iou", self.iou_threshold)
         new_cam = data.get("camera_source", self.camera_source)
         self.auto_save_ng = data.get("auto_save_ng", self.auto_save_ng)
+        self.centering_delay_sec = data.get("centering_delay_sec", self.centering_delay_sec)
 
         # Update worker
         if self.worker is not None:
             self.worker.set_thresholds(self.conf_threshold, self.iou_threshold)
             self.worker.set_auto_save_ng(self.auto_save_ng)
+            self.worker.set_centering_delay(self.centering_delay_sec)
             if new_cam != self.camera_source:
                 self.camera_source = new_cam
                 self.worker.set_camera_source(new_cam)
