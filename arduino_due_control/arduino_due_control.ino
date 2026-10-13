@@ -4,9 +4,7 @@
 // Pin Definitions for Arduino Due
 // ==========================================
 
-// 感測器與按鈕腳位
-const int PIN_IR_SENSOR        = 2;  // PCB 到位紅外線感測器 (遮擋觸發 LOW / NPN Input)
-const int PIN_SENSOR_TRIGGER   = PIN_IR_SENSOR; // 相容性別名
+// 按鈕腳位
 const int PIN_EMERGENCY_STOP   = 3;  // 緊急停止按鈕 (內部上拉, Press -> LOW)
 
 // 輸送帶步進馬達驅動器腳位 (A4988 驅動模組)
@@ -36,9 +34,6 @@ const int SERVO_ANGLE_NG       = 60;  // NG 偏轉/推送角度 (度)
 // 步進馬達速度與脈衝設定 (Stepper Motor Settings)
 const int STEPPER_PULSE_DELAY_US = 1000; // 脈衝週期 (微秒, NEMA17 建議設定 800~1500us 避免失步抖動)
 
-// 紅外線感測器觸發邏輯位準設定 (預設遮擋為 LOW；若感測器相反，可改為 HIGH)
-const int IR_TRIGGER_STATE     = LOW; 
-
 // 動作計時器 (Timers in milliseconds)
 const unsigned long TIMEOUT_INSPECTION_MS   = 15000; // 等待 Jetson 辨識逾時 (15秒)
 const unsigned long DURATION_SORT_OK_MS     = 1500;  // OK 板通過時間
@@ -47,8 +42,6 @@ const unsigned long DURATION_BUZZER_MS      = 300;   // NG 蜂鳴器響起時間
 
 // 若在運轉中超過此時間未收到 Jetson 發送的心跳包，將自動強制停機防護 (預設 5000ms = 5秒)
 const unsigned long HEARTBEAT_TIMEOUT_MS    = 5000;  
-// 延遲時間（PCB置中用）
-const int DELAY_TIME=2000;
 
 // ==========================================
 // 系統狀態機枚舉 (State Machine Enums)
@@ -56,7 +49,6 @@ const int DELAY_TIME=2000;
 enum SystemState {
   STATE_IDLE,             // 待機狀態 (Standby)
   STATE_CONVEYOR_RUNNING, // 輸送帶運轉中 (Scanning for PCB)
-  STATE_CENTERING,          // PCB 置中時狀態 (Centering PCB)
   STATE_WAIT_INSPECTION,  // PCB 到位停機，等待 Jetson 辨識結果 (Waiting for Jetson OK/NG)
   STATE_SORT_OK,          // 處置 OK 板 (OK Pass Through)
   STATE_SORT_NG,          // 處置 NG 板 (NG Divert / Eject)
@@ -156,7 +148,6 @@ void loop() {
 // 硬體腳位初始化
 // ==========================================
 void setupPins() {
-  pinMode(PIN_IR_SENSOR, INPUT_PULLUP);
   pinMode(PIN_EMERGENCY_STOP, INPUT_PULLUP);
 
   pinMode(PIN_STEPPER_STEP, OUTPUT);
@@ -251,14 +242,7 @@ void parseCommand(String cmd) {
   else if (cmd == "PING" || cmd == "HEARTBEAT") {
     sendSerialPrintln("PONG");
   }
-  else if (cmd == "READ_IR" || cmd == "IR_STATUS" || cmd == "CMD:IR") {
-    int irVal = digitalRead(PIN_IR_SENSOR);
-    if (irVal == IR_TRIGGER_STATE) {
-      sendSerialPrintln("INFO:IR_SENSOR_STATE:TRIGGERED (PCB Detected)");
-    } else {
-      sendSerialPrintln("INFO:IR_SENSOR_STATE:CLEAR (No PCB)");
-    }
-  }else if(cmd=="PCB_READY"){
+  else if (cmd == "PCB_READY" || cmd == "CMD:PCB_READY") {
     currentState=STATE_WAIT_INSPECTION;
     stateTimer=millis();
     setTowerLight(false,true,false);
@@ -299,31 +283,6 @@ void runStateMachine() {
       stepMotorNonBlocking();
       setTowerLight(true, false, false);
 
-      // 2. 紅外線遮擋後，延遲兩秒讓PCB置中，進入等待辨識狀態
-      if (digitalRead(PIN_IR_SENSOR) == IR_TRIGGER_STATE) {
-        currentState = STATE_WAIT_INSPECTION;
-        stateTimer = millis();
-        setTowerLight(false, true, false); // 切換黃燈 (辨識中)
-
-        sendSerialPrintln("INFO:IR_SENSOR_TRIGGERED:PCB_DETECTED");
-        sendSerialPrintln("INFO:STEPPER_MOTOR_STOPPED");
-        sendSerialPrintln("TRIGGER");
-        sendSerialPrintln("STATUS:WAIT_INSPECTION");
-      }
-      break;
-
-    case STATE_CENTERING:
-     stepMotorNonBlocking();
-     setTowerLight(false, true, false); // 切換黃燈 (辨識中)
-     if(millis()-stateTimer>=DELAY_TIME){
-       currentState=STATE_WAIT_INSPECTION;
-       stateTimer=millis();
-       setTowerLight(false, true, false); // 切換黃燈 (辨識中)
-        sendSerialPrintln("INFO:PCB_CENTERING_COMPLETE");
-        sendSerialPrintln("INFO:STEPPER_MOTOR_STOPPED");
-        sendSerialPrintln("TRIGGER");
-        sendSerialPrintln("STATUS:WAIT_INSPECTION");
-     }
       break;
 
     case STATE_WAIT_INSPECTION:

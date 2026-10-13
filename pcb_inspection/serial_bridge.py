@@ -25,12 +25,10 @@ class ArduinoBridge:
         self,
         port: str = SERIAL_PORT,
         baudrate: int = SERIAL_BAUD,
-        trigger_callback: Optional[Callable[[], None]] = None,
         feedback_callback: Optional[Callable[[str], None]] = None,
     ):
         self.port = port
         self.baudrate = baudrate
-        self.trigger_callback = trigger_callback
         self.feedback_callback = feedback_callback
 
         self.ser: Optional[serial.Serial] = None
@@ -129,10 +127,6 @@ class ArduinoBridge:
         """Send RESET command to Arduino Due."""
         return self.send_command("RESET")
 
-    def read_ir_status(self) -> bool:
-        """Query real-time IR sensor state from Arduino Due."""
-        return self.send_command("READ_IR")
-
     def _heartbeat_loop(self):
         """Industrial Fail-Safe Heartbeat sender: Send PING to Arduino Due every 1.5s."""
         while self.running and self.ser and self.ser.is_open:
@@ -149,11 +143,6 @@ class ArduinoBridge:
 
                 if line != "PONG":
                     logger.info(f"Received from Arduino: '{line}'")
-
-                # Handle trigger from PCB arrival sensor
-                if line == "TRIGGER" or "TRIGGER" in line:
-                    if self.trigger_callback:
-                        self.trigger_callback()
 
                 # Dispatch feedback callback
                 if self.feedback_callback and line != "PONG":

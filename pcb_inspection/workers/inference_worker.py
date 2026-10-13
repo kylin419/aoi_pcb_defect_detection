@@ -1,5 +1,6 @@
 import os
 import time
+from collections import deque
 import psutil
 import numpy as np
 
@@ -89,6 +90,7 @@ class InferenceWorker(QObject):
         self.pcb_stop_sent=False
         self.inspect_waiting=False
         self.pcb_present=False
+        self._pcb_detection_votes = deque(maxlen=5)
 
         self.result_manager = ResultManager()
 
@@ -127,9 +129,6 @@ class InferenceWorker(QObject):
 
             self.log.emit("Connecting to Arduino Due Serial Bridge...")
             self.serial_bridge = ArduinoBridge(
-                trigger_callback=lambda: QMetaObject.invokeMethod(
-                    self, "trigger", Qt.ConnectionType.QueuedConnection
-                ),
                 feedback_callback=lambda msg: self.log.emit(f"Arduino: {msg}"),
             )
             if self.serial_bridge.connect():
@@ -271,8 +270,9 @@ class InferenceWorker(QObject):
         self.running = True
         # Reset PCB inspection state
         self.pcb_stop_sent=False
-        self.inspection_waiting=False
+        self.inspect_waiting=False
         self.pcb_present=False
+        self._pcb_detection_votes.clear()
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_start()
@@ -296,7 +296,7 @@ class InferenceWorker(QObject):
 
     @pyqtSlot()
     def trigger(self):
-        """Single-shot inspection (e.g. triggered by sensor or button)."""
+        """Run a single-shot inspection from the GUI or ROS command."""
         if not self.initialized:
             return
         self.process_frame(is_trigger=True)
@@ -313,27 +313,31 @@ class InferenceWorker(QObject):
 
             if not ret or frame is None:
                 return
-            # detect pcb and stop the motor
-            if self.running:
-                green_ratio=pcb_green_area_detection(frame)
+            # Camera is the sole automatic PCB arrival source. A 3-of-5 vote
+            # rejects isolated green frames while admitting partly visible boards.
+            if self.running and is_new:
+                green_ratio = pcb_green_area_detection(frame)
                 if not self.pcb_present:
-                    if green_ratio>0.6:
-                        self.log.emit("PCB detected by camera.")
-                        if self.serial_bridge:
-                            success=self.serial_bridge.send_ready()
-                            if success:
-                                self.pcb_stop_sent=True
-                                self.inspect_waiting=True
-                                self.pcb_present=True
-                                self.log.emit("PCB detected. PCB_READY sent to Arduino.")
-                                return
-                            
-                else:
-                    if not self.inspect_waiting:
-                        if green_ratio<0.1:
-                            self.pcb_present=False
-                            self.log.emit("PCB left camera view. Ready for next PCB.")
-                    return
+                    self._pcb_detection_votes.append(green_ratio >= 0.08)
+                    if sum(self._pcb_detection_votes) >= 3:
+                        self.log.emit(f"PCB detected by camera (green area {green_ratio:.3f}).")
+                        if self.serial_bridge and self.serial_bridge.send_ready():
+                            self.pcb_stop_sent = True
+                            self.inspect_waiting = True
+                            self.pcb_present = True
+                            self._pcb_detection_votes.clear()
+                            self.log.emit("PCB detected. PCB_READY sent to Arduino; conveyor stopped.")
+                        elif self.serial_bridge:
+                            self.log.emit("PCB detected, but PCB_READY could not be sent to Arduino.")
+                elif not self.inspect_waiting and green_ratio < 0.025:
+                    self.pcb_present = False
+                    self._pcb_detection_votes.clear()
+                    self.log.emit("PCB left camera view. Ready for next PCB.")
+
+            # Continue into defect inference after camera detection; only hold
+            # subsequent frames once inspection has completed.
+            if self.running and self.pcb_present and not self.inspect_waiting:
+                return
             # Avoid redundant processing if a new frame hasn't arrived yet
             if not is_trigger and not is_new:
                 return

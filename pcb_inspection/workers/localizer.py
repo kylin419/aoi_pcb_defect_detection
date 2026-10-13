@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from config import PCB_HSV_LOWER, PCB_HSV_UPPER
+from ..config import PCB_HSV_LOWER, PCB_HSV_UPPER
 
 _SCALE = 0.25
 _CLOSE = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))  # 縮圖後的尺寸
@@ -12,10 +12,18 @@ def pcb_green_area_detection(frame, return_info: bool = False):
     回傳最大綠色（防焊）區域占整張畫面的比例。
     return_info=True 時回傳 dict：ratio / bbox(正規化) / center_offset / fill。
     """
+    if frame is None or frame.size == 0:
+        empty = {"ratio": 0.0, "bbox": None, "center_offset": None, "fill": 0.0}
+        return empty if return_info else 0.0
+
     small = cv2.resize(frame, None, fx=_SCALE, fy=_SCALE,
                        interpolation=cv2.INTER_AREA)
+    # A small blur suppresses sensor noise while retaining PCB edges.
+    small = cv2.GaussianBlur(small, (5, 5), 0)
     hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array(PCB_HSV_LOWER), np.array(PCB_HSV_UPPER))
+    lower = np.array(PCB_HSV_LOWER, dtype=np.uint8)
+    upper = np.array(PCB_HSV_UPPER, dtype=np.uint8)
+    mask = cv2.inRange(hsv, lower, upper)
 
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _OPEN)    # 去雜點
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _CLOSE)  # 補起零件、絲印造成的破洞
