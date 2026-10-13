@@ -37,7 +37,6 @@ const int STEPPER_PULSE_DELAY_US = 1000; // 脈衝週期 (微秒, NEMA17 建議�
 // 動作計時器 (Timers in milliseconds)
 const unsigned long TIMEOUT_INSPECTION_MS   = 15000; // 等待 Jetson 辨識逾時 (15秒)
 const unsigned long DURATION_SORT_OK_MS     = 1500;  // OK 板通過時間
-const unsigned long DURATION_SORT_NG_MS     = 2000;  // NG 板推離時間
 const unsigned long DURATION_BUZZER_MS      = 300;   // NG 蜂鳴器響起時間
 
 // 若在運轉中超過此時間未收到 Jetson 發送的心跳包，將自動強制停機防護 (預設 5000ms = 5秒)
@@ -223,6 +222,8 @@ void parseCommand(String cmd) {
   }
   else if (cmd == "START" || cmd == "CMD:START") {
     systemEnabled = true;
+    digitalWrite(PIN_NG_CYLINDER, LOW);
+    sorterServo.write(SERVO_ANGLE_OK);
     currentState = STATE_CONVEYOR_RUNNING;
     setTowerLight(true, false, false);
     sendSerialPrintln("STATUS:RUNNING");
@@ -243,10 +244,24 @@ void parseCommand(String cmd) {
     sendSerialPrintln("PONG");
   }
   else if (cmd == "PCB_READY" || cmd == "CMD:PCB_READY") {
-    currentState=STATE_WAIT_INSPECTION;
-    stateTimer=millis();
-    setTowerLight(false,true,false);
+    currentState = STATE_WAIT_INSPECTION;
+    stateTimer = millis();
+    setTowerLight(false, true, false);
+    sendSerialPrintln("ACK:PCB_READY_STOPPED");
     sendSerialPrintln("STATUS:WAIT_INSPECTION");
+  }
+  else if (cmd == "RESUME" || cmd == "CMD:RESUME") {
+    if (currentState == STATE_SORT_NG) {
+      digitalWrite(PIN_NG_CYLINDER, LOW);
+      sorterServo.write(SERVO_ANGLE_OK);
+      currentState = STATE_CONVEYOR_RUNNING;
+      stateTimer = millis();
+      setTowerLight(true, false, false);
+      sendSerialPrintln("ACK:RESUME_RUNNING");
+      sendSerialPrintln("STATUS:RUNNING");
+    } else {
+      sendSerialPrintln("ERR:RESUME_REJECTED_NOT_IN_NG_STATE");
+    }
   }
   else {
     sendSerialPrint("ERR:UNKNOWN_COMMAND:");

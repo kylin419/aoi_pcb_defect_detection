@@ -113,6 +113,8 @@ class MainWindow(QMainWindow):
         self.worker.frame_ready.connect(self.video.set_frame)
         self.worker.fps_ready.connect(self.video.set_fps)
         self.worker.dashboard_ready.connect(self.on_dashboard_update)
+        self.worker.inspection_state.connect(self.dashboard.set_inspection_state)
+        self.worker.inspection_state.connect(self.status.set_inspection_status)
         self.worker.status_ready.connect(self.on_status_ready)
 
         self.worker.log.connect(self.log.info)
@@ -137,11 +139,13 @@ class MainWindow(QMainWindow):
         self.toolbar.set_running(True)
         self.status.set_engine(True)
         self.status.set_mode("Continuous")
+        self.dashboard.set_inspection_state("SEARCHING")
         self.log.success("Continuous Inspection Running.")
 
     def on_stopped(self):
         self.toolbar.set_running(False)
         self.status.set_mode("Standby")
+        self.dashboard.set_inspection_state("IDLE")
         self.log.warning("Inspection Paused (Live Camera Streaming).")
 
     def on_status_ready(self, status: dict):

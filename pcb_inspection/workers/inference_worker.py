@@ -61,6 +61,7 @@ class InferenceWorker(QObject):
 
     frame_ready = pyqtSignal(object)
     dashboard_ready = pyqtSignal(dict)
+    inspection_state = pyqtSignal(str)
     status_ready = pyqtSignal(dict)
     fps_ready = pyqtSignal(float)
 
@@ -83,6 +84,7 @@ class InferenceWorker(QObject):
         self.running = False
         
         self.initialized = False
+        self.camera_ready = False
         
         self.fps_tracker = FpsTracker(window_size=15)
         self._last_preview_dash_time = 0.0
@@ -90,6 +92,10 @@ class InferenceWorker(QObject):
         self.pcb_stop_sent=False
         self.inspect_waiting=False
         self.pcb_present=False
+        self._stop_fault=False
+        self._ng_hold=False
+        self._ng_removed_at=None
+        self._ng_absence_votes=deque(maxlen=5)
         self._pcb_detection_votes = deque(maxlen=5)
 
         self.result_manager = ResultManager()
@@ -116,6 +122,7 @@ class InferenceWorker(QObject):
             self.log.emit("Initializing Camera...")
             self.camera = Camera()
             success, mode, cam_msg = self.camera.open()
+            self.camera_ready = success
             self.log.emit(f"Camera [{mode}]: {cam_msg}")
 
             self.log.emit("Loading TensorRT YOLOv12 Engine...")
@@ -147,7 +154,7 @@ class InferenceWorker(QObject):
 
             # Emit initial ready status
             self.status_ready.emit({
-                "camera": True,
+                "camera": success,
                 "camera_mode": mode,
                 "engine": True,
                 "ros": True,
@@ -264,6 +271,11 @@ class InferenceWorker(QObject):
             self.error.emit("Worker is not initialized.")
             return
 
+        if not self.camera_ready:
+            self.inspection_state.emit("ERROR")
+            self.error.emit("Cannot start conveyor inspection: camera is not available.")
+            return
+
         if self.running:
             return
 
@@ -272,11 +284,16 @@ class InferenceWorker(QObject):
         self.pcb_stop_sent=False
         self.inspect_waiting=False
         self.pcb_present=False
+        self._stop_fault=False
+        self._ng_hold=False
+        self._ng_removed_at=None
+        self._ng_absence_votes.clear()
         self._pcb_detection_votes.clear()
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_start()
         self.started.emit()
+        self.inspection_state.emit("SEARCHING")
         self.log.emit("Continuous Defect Inspection Started.")
 
     @pyqtSlot()
@@ -291,6 +308,7 @@ class InferenceWorker(QObject):
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_stop()
+        self.inspection_state.emit("IDLE")
         self.stopped.emit()
         self.log.emit("Continuous Inspection Paused (Live Camera Active).")
 
@@ -299,6 +317,7 @@ class InferenceWorker(QObject):
         """Run a single-shot inspection from the GUI or ROS command."""
         if not self.initialized:
             return
+        self.inspection_state.emit("INSPECTING")
         self.process_frame(is_trigger=True)
 
     @pyqtSlot()
@@ -320,24 +339,79 @@ class InferenceWorker(QObject):
                 if not self.pcb_present:
                     self._pcb_detection_votes.append(green_ratio >= 0.08)
                     if sum(self._pcb_detection_votes) >= 3:
+                        self.inspection_state.emit("PCB_DETECTED")
                         self.log.emit(f"PCB detected by camera (green area {green_ratio:.3f}).")
                         if self.serial_bridge and self.serial_bridge.send_ready():
                             self.pcb_stop_sent = True
                             self.inspect_waiting = True
                             self.pcb_present = True
                             self._pcb_detection_votes.clear()
-                            self.log.emit("PCB detected. PCB_READY sent to Arduino; conveyor stopped.")
+                            self.last_frame = frame
+                            self.frame_ready.emit(frame)
+                            self.inspection_state.emit("STOP_CONFIRMED")
+                            self.log.emit("Arduino confirmed conveyor stopped; starting defect inspection.")
+                            return
                         elif self.serial_bridge:
-                            self.log.emit("PCB detected, but PCB_READY could not be sent to Arduino.")
-                elif not self.inspect_waiting and green_ratio < 0.025:
+                            self.pcb_present = True
+                            self._stop_fault = True
+                            self._pcb_detection_votes.clear()
+                            self.inspection_state.emit("STOP_UNCONFIRMED")
+                            self.log.emit("PCB detected, but Arduino stop was not confirmed; inspect the controller connection and motor state before restarting.")
+                elif not self.inspect_waiting and not self._stop_fault:
+                    if self._ng_hold:
+                        self._ng_absence_votes.append(green_ratio < 0.025)
+                        if sum(self._ng_absence_votes) >= 3:
+                            if self._ng_removed_at is None:
+                                self._ng_removed_at = time.monotonic()
+                                self.inspection_state.emit("NG_RESUME_DELAY")
+                        else:
+                            self._ng_removed_at = None
+                            self.inspection_state.emit("NG_WAIT_REMOVE")
+                    elif green_ratio < 0.025:
+                        self.pcb_present = False
+                        self._pcb_detection_votes.clear()
+                        self.inspection_state.emit("SEARCHING")
+                        self.log.emit("PCB left camera view. Ready for next PCB.")
+
+            if (
+                self.running
+                and self._ng_hold
+                and not self._stop_fault
+                and self._ng_removed_at is not None
+                and time.monotonic() - self._ng_removed_at >= 2.0
+                and sum(self._ng_absence_votes) >= 3
+            ):
+                if self.serial_bridge and self.serial_bridge.send_resume():
+                    self._ng_hold = False
+                    self._ng_removed_at = None
+                    self._ng_absence_votes.clear()
                     self.pcb_present = False
                     self._pcb_detection_votes.clear()
-                    self.log.emit("PCB left camera view. Ready for next PCB.")
+                    self.inspection_state.emit("SEARCHING")
+                    self.log.emit("NG PCB removal confirmed; Arduino resumed the conveyor after a 2-second delay.")
+                else:
+                    self._stop_fault = True
+                    self.inspection_state.emit("RESUME_UNCONFIRMED")
+                    self.log.emit("Arduino did not confirm conveyor resume; the system remains stopped.")
 
             # Continue into defect inference after camera detection; only hold
             # subsequent frames once inspection has completed.
             if self.running and self.pcb_present and not self.inspect_waiting:
                 return
+
+            # While the conveyor is searching, keep the live preview moving
+            # without running defect inference on empty frames.
+            if self.running and self.serial_bridge and not self.pcb_present:
+                if not is_new:
+                    return
+                fps = self.fps_tracker.update()
+                if fps <= 0.0 and getattr(self.camera, "capture_fps", 0) > 0:
+                    fps = self.camera.capture_fps
+                self.last_frame = frame
+                self.frame_ready.emit(frame)
+                self.fps_ready.emit(fps)
+                return
+
             # Avoid redundant processing if a new frame hasn't arrived yet
             if not is_trigger and not is_new:
                 return
@@ -365,6 +439,7 @@ class InferenceWorker(QObject):
             # -------------------------------------------------------------
             # 2. DEFECT INSPECTION MODE (Continuous or Single Trigger)
             # -------------------------------------------------------------
+            self.inspection_state.emit("INSPECTING")
             result = self.detector.detect(frame)
 
             # Draw visual defect overlay
@@ -386,14 +461,21 @@ class InferenceWorker(QObject):
             self.last_result = result
 
             # Send hardware result signal to Arduino Due (conveyor + diverter control)
+            result_acknowledged = True
             if self.serial_bridge:
-                if result["ok"]:
-                    self.serial_bridge.send_ok()
-                else:
-                    self.serial_bridge.send_ng()
+                result_acknowledged = self.serial_bridge.send_result(
+                    "OK" if result["ok"] else "NG"
+                )
+                if not result_acknowledged:
+                    self.log.emit("Arduino did not acknowledge the inspection result; check controller state and serial connection.")
             # Inspection finished
             self.pcb_stop_sent=False
             self.inspect_waiting=False        
+            self._ng_hold = not result["ok"] and result_acknowledged
+            self._ng_removed_at = None
+            self._ng_absence_votes.clear()
+            if not result["ok"] and not result_acknowledged:
+                self._stop_fault = True
 
             # Publish to ROS 2 (throttled)
             if self.ros_node is not None:
@@ -413,8 +495,13 @@ class InferenceWorker(QObject):
             self.frame_ready.emit(overlay)
             self.fps_ready.emit(fps)
             self.dashboard_ready.emit(self._build_dashboard(fps, result))
+            if result_acknowledged:
+                self.inspection_state.emit("PASS" if result["ok"] else "NG_WAIT_REMOVE")
+            else:
+                self.inspection_state.emit("RESULT_UNCONFIRMED")
 
         except Exception as e:
+            self.inspection_state.emit("ERROR")
             self.error.emit(f"Processing error: {e}")
 
     @pyqtSlot()

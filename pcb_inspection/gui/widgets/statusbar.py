@@ -39,7 +39,9 @@ class StatusBarWidget(QStatusBar):
         self.camera = StatusItem("Camera")
         self.engine = StatusItem("TensorRT")
         self.mode = StatusItem("Mode")
+        self.inspection = StatusItem("Inspection")
 
+        self.addPermanentWidget(self.inspection)
         self.addPermanentWidget(self.ros)
         self.addPermanentWidget(self.camera)
         self.addPermanentWidget(self.engine)
@@ -49,6 +51,26 @@ class StatusBarWidget(QStatusBar):
         self.set_camera("Checking...")
         self.set_engine(False)
         self.set_mode("Standby")
+        self.set_inspection_status("IDLE")
+
+    def set_inspection_status(self, state: str):
+        labels = {
+            "IDLE": ("待機", "#00D084"),
+            "SEARCHING": ("搜尋 PCB", "#00D2FF"),
+            "PCB_DETECTED": ("已偵測 PCB", "#FFB300"),
+            "STOP_CONFIRMED": ("已停帶", "#00D084"),
+            "INSPECTING": ("辨識中", "#FFB300"),
+            "PASS": ("良品 OK", "#00D084"),
+            "FAIL": ("瑕疵 NG", "#FF5555"),
+            "NG_WAIT_REMOVE": ("待移除瑕疵板", "#FF5555"),
+            "NG_RESUME_DELAY": ("2秒後恢復", "#FFB300"),
+            "RESUME_UNCONFIRMED": ("恢復未確認", "#FF5555"),
+            "STOP_UNCONFIRMED": ("停帶未確認", "#FF5555"),
+            "RESULT_UNCONFIRMED": ("結果未確認", "#FF5555"),
+            "ERROR": ("辨識錯誤", "#FF5555"),
+        }
+        text, color = labels.get(state, (state, "#CCCCCC"))
+        self.inspection.set_state(text, color)
 
     def set_ros(self, active: bool, text: str = "Active"):
         if active:

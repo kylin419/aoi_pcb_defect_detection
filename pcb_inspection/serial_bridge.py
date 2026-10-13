@@ -36,6 +36,9 @@ class ArduinoBridge:
         self.read_thread: Optional[threading.Thread] = None
         self.heartbeat_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self._ready_ack = threading.Event()
+        self._resume_ack = threading.Event()
+        self._result_ack = {"OK": threading.Event(), "NG": threading.Event()}
 
     def find_arduino_port(self) -> Optional[str]:
         """Auto-detect Arduino Due USB serial port if default port does not exist."""
@@ -112,6 +115,17 @@ class ArduinoBridge:
         """Send NG result signal to Arduino Due."""
         return self.send_command("NG")
 
+    def send_result(self, result: str, timeout: float = 1.5) -> bool:
+        """Send an inspection result and wait for Arduino to accept it."""
+        result = result.upper()
+        if result not in self._result_ack:
+            return False
+        ack_event = self._result_ack[result]
+        ack_event.clear()
+        if not self.send_command(result):
+            return False
+        return ack_event.wait(timeout)
+
     def send_start(self) -> bool:
         """Send START conveyor command to Arduino Due."""
         return self.send_command("START")
@@ -119,8 +133,31 @@ class ArduinoBridge:
     def send_stop(self) -> bool:
         """Send STOP conveyor command to Arduino Due."""
         return self.send_command("STOP")
-    def send_ready(self)->bool:
-        return self.send_command("PCB_READY")
+
+    def send_resume(self, timeout: float = 1.5) -> bool:
+        """Resume after NG removal and wait for Arduino confirmation."""
+        self._resume_ack.clear()
+        if not self.send_command("RESUME"):
+            return False
+        if self._resume_ack.wait(timeout):
+            return True
+        logger.error("Arduino did not acknowledge RESUME; issuing STOP.")
+        self.send_stop()
+        return False
+
+    def send_ready(self, timeout: float = 1.5) -> bool:
+        """Stop the conveyor and wait for Arduino's stopped-state acknowledgement."""
+        self._ready_ack.clear()
+        if not self.send_command("PCB_READY"):
+            return False
+        if self._ready_ack.wait(timeout):
+            return True
+
+        # A missing acknowledgement means the stop state is unconfirmed.
+        # Issue STOP as a fail-safe and let the caller hold inspection.
+        logger.error("Arduino did not acknowledge PCB_READY; issuing STOP.")
+        self.send_stop()
+        return False
 
     
     def send_reset(self) -> bool:
@@ -143,6 +180,15 @@ class ArduinoBridge:
 
                 if line != "PONG":
                     logger.info(f"Received from Arduino: '{line}'")
+
+                if line == "ACK:PCB_READY_STOPPED":
+                    self._ready_ack.set()
+                elif line == "ACK:RESUME_RUNNING":
+                    self._resume_ack.set()
+                elif line == "ACK:OK":
+                    self._result_ack["OK"].set()
+                elif line == "ACK:NG":
+                    self._result_ack["NG"].set()
 
                 # Dispatch feedback callback
                 if self.feedback_callback and line != "PONG":
