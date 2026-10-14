@@ -126,7 +126,7 @@ void setup() {
 // ==========================================
 void loop() {
   // 1. 檢查緊急停止按鈕
-  if (digitalRead(PIN_EMERGENCY_STOP) == LOW) {
+  if (digitalRead(PIN_EMERGENCY_STOP) == HIGH) {
     emergencyStop();
   }
 
