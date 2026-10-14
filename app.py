@@ -28,7 +28,10 @@ def main():
     load_theme(app)
 
     window = MainWindow()
-    window.show()
+    if "--fullscreen" in sys.argv:
+        window.showFullScreen()
+    else:
+        window.showMaximized()
 
     # Enter Qt main event loop
     exit_code = app.exec()

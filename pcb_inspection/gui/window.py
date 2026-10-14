@@ -1,10 +1,14 @@
 from PyQt6.QtCore import Qt, QThread, QMetaObject
+from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QWidget,
     QMainWindow,
     QVBoxLayout,
     QHBoxLayout,
     QMessageBox,
+    QLabel,
+    QScrollArea,
+    QFrame,
 )
 
 from .widgets.video_widget import VideoWidget
@@ -33,7 +37,8 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("AOI PCB Inspection System [YOLOv12 & ROS 2]")
-        self.resize(1600, 920)
+        self.resize(1280, 720)
+        self.setMinimumSize(800, 480)
 
         self.thread: QThread | None = None
         self.worker: InferenceWorker | None = None
@@ -62,13 +67,31 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(10)
 
+        # Emergency-stop alarm banner (hidden unless alarm)
+        self.alarm_banner = QLabel("")
+        self.alarm_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alarm_banner.setStyleSheet(
+            "background:#C0392B;color:white;font-size:16px;font-weight:bold;padding:8px;border-radius:6px;"
+        )
+        self.alarm_banner.setVisible(False)
+        root.addWidget(self.alarm_banner)
+
         # Top area: Video viewer (left) + Inspection Dashboard (right)
         top = QHBoxLayout()
         self.video = VideoWidget()
         self.dashboard = Dashboard()
 
+        # Dashboard scrolls when the window is small
+        self.dash_scroll = QScrollArea()
+        self.dash_scroll.setWidgetResizable(True)
+        self.dash_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.dash_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.dash_scroll.setStyleSheet("QScrollArea{background:transparent;}")
+        self.dash_scroll.setWidget(self.dashboard)
+        self.dash_scroll.setMinimumWidth(self.dashboard.minimumSizeHint().width() + 24)
+
         top.addWidget(self.video, 3)
-        top.addWidget(self.dashboard, 1)
+        top.addWidget(self.dash_scroll, 1)
         root.addLayout(top, 4)
 
         # Bottom area: Action toolbar + Log console
@@ -112,6 +135,11 @@ class MainWindow(QMainWindow):
         self.toolbar.reload_clicked.connect(self.on_reload_model)
         self.toolbar.settings_clicked.connect(self.on_settings)
         self.toolbar.exit_clicked.connect(self.close)
+        self.toolbar.reset_alarm_clicked.connect(self.on_alarm_reset)
+        self.toolbar.fullscreen_clicked.connect(self.toggle_fullscreen)
+        QShortcut(QKeySequence("F11"), self, activated=self.toggle_fullscreen)
+        QShortcut(QKeySequence("Esc"), self, activated=self.exit_fullscreen)
+        self.worker.alarm_changed.connect(self.on_alarm_changed)
 
         # Worker to UI
         self.worker.frame_ready.connect(self.video.set_frame)
@@ -159,6 +187,40 @@ class MainWindow(QMainWindow):
             self.status.set_engine(status["engine"])
         if "ros" in status:
             self.status.set_ros(status["ros"])
+
+    def on_alarm_changed(self, active: bool, reason: str):
+        self.toolbar.set_alarm(active)
+        self.status.set_safety(active, reason)
+        if active:
+            self.alarm_banner.setText(
+                f"🚨 EMERGENCY STOP / ALARM: {reason}  —  放開緊急按鈕後按「Reset Alarm」復歸"
+            )
+            self.alarm_banner.setVisible(True)
+            self.dashboard.set_inspection_state("IDLE")
+        else:
+            self.alarm_banner.setVisible(False)
+            self.log.success("Alarm cleared. System is IDLE.")
+
+    def on_alarm_reset(self):
+        reply = QMessageBox.question(
+            self,
+            "Reset Alarm",
+            "請確認緊急停止按鈕已放開、輸送帶上無異物。\n確定要解除警報嗎？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            QMetaObject.invokeMethod(self.worker, "reset_alarm", Qt.ConnectionType.QueuedConnection)
+
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def exit_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
 
     def on_ros_command(self, cmd: str):
         self.log.info(f"<b>[ROS 2 Command]</b> Executed: <code>{cmd}</code>")

@@ -5,7 +5,7 @@
 // ==========================================
 
 // 按鈕腳位
-const int PIN_EMERGENCY_STOP   = 3;  // 緊急停止按鈕 (內部上拉, Press -> LOW)
+const int PIN_EMERGENCY_STOP   = 3;  // 緊急停止按鈕 (常閉NC接GND, 內部上拉; 按下/斷線 -> HIGH)
 
 // 輸送帶步進馬達驅動器腳位 (A4988 驅動模組)
 const int PIN_STEPPER_STEP     = 4;  // A4988 STEP 脈衝腳位
@@ -81,7 +81,10 @@ void stepMotorNonBlocking();
 void triggerBuzzer(unsigned long durationMs);
 void updateBuzzer();
 void setTowerLight(bool green, bool yellow, bool red);
-void emergencyStop();
+void emergencyStop(const char* reason);
+void resetFromAlarm();
+bool estopPressed();
+unsigned long lastAlarmReport = 0;
 void checkHeartbeatSafety();
 
 // 雙序列埠輸出輔助函式 (同時支援 Programming Port & Native USB Port)
@@ -126,8 +129,8 @@ void setup() {
 // ==========================================
 void loop() {
   // 1. 檢查緊急停止按鈕
-  if (digitalRead(PIN_EMERGENCY_STOP) == HIGH) {
-    emergencyStop();
+  if (estopPressed()) {
+    emergencyStop("EMERGENCY_STOP_ACTIVATED");
   }
 
   // 2. 處理序列埠命令 (同時檢查兩個 USB 孔)
@@ -142,6 +145,12 @@ void loop() {
   // 5. 執行主控制狀態機
   if (systemEnabled && currentState != STATE_EMERGENCY_STOP) {
     runStateMachine();
+  }
+
+  // 7. 警報期間每2秒回報一次, 讓 GUI 保持警報顯示
+  if (currentState == STATE_EMERGENCY_STOP && millis() - lastAlarmReport >= 2000) {
+    lastAlarmReport = millis();
+    sendSerialPrintln("ALARM:STILL_ACTIVE");
   }
 }
 
@@ -207,6 +216,20 @@ void parseCommand(String cmd) {
   // 收到任何指令時，更新心跳時間戳記
   lastHeartbeatTime = millis();
 
+  // 警報狀態: 只接受 RESET / PING, 其餘拒絕
+  if (currentState == STATE_EMERGENCY_STOP) {
+    if (cmd == "RESET" || cmd == "CMD:RESET") {
+      resetFromAlarm();
+    } else if (cmd == "PING" || cmd == "HEARTBEAT") {
+      sendSerialPrintln("PONG");
+    } else if (cmd == "STOP" || cmd == "CMD:STOP") {
+      // 已經停止, 忽略
+    } else {
+      sendSerialPrintln("ERR:IN_ALARM_SEND_RESET");
+    }
+    return;
+  }
+
   if (cmd == "OK" || cmd == "CMD:OK" || cmd == "RESULT:OK") {
     if (currentState == STATE_WAIT_INSPECTION) {
       sendSerialPrintln("ACK:OK");
@@ -224,6 +247,7 @@ void parseCommand(String cmd) {
   }
   else if (cmd == "START" || cmd == "CMD:START") {
     systemEnabled = true;
+    digitalWrite(PIN_STEPPER_ENABLE, LOW);   // 確保驅動器已重新使能
     digitalWrite(PIN_NG_CYLINDER, LOW);
     sorterServo.write(SERVO_ANGLE_OK);
     currentState = STATE_CONVEYOR_RUNNING;
@@ -287,8 +311,7 @@ void checkHeartbeatSafety() {
   // 僅在運轉中進行斷線心跳包檢測
   if (currentState == STATE_CONVEYOR_RUNNING || currentState == STATE_CENTERING || currentState == STATE_WAIT_INSPECTION) {
     if (millis() - lastHeartbeatTime > HEARTBEAT_TIMEOUT_MS) {
-      sendSerialPrintln("ALARM:JETSON_COMMUNICATION_LOST_FAILSAFE_STOP");
-      emergencyStop();
+      emergencyStop("JETSON_COMMUNICATION_LOST_FAILSAFE_STOP");
     }
   }
 }
@@ -408,11 +431,36 @@ void updateBuzzer() {
 // ==========================================
 // 緊急停止處理 (Emergency Stop Handler)
 // ==========================================
-void emergencyStop() {
+// 常閉(NC)接線: 按下或斷線 -> HIGH
+bool estopPressed() {
+  return digitalRead(PIN_EMERGENCY_STOP) == HIGH;
+}
+
+void emergencyStop(const char* reason) {
+  if (currentState == STATE_EMERGENCY_STOP) return;   // 只觸發一次
   currentState = STATE_EMERGENCY_STOP;
   digitalWrite(PIN_STEPPER_ENABLE, HIGH); // 關閉馬達驅動器
   digitalWrite(PIN_NG_CYLINDER, LOW);
   digitalWrite(PIN_BUZZER, HIGH);
+  buzzerActive = false;                   // 警報蜂鳴常響, 不被計時器關掉
   setTowerLight(false, false, true);
-  sendSerialPrintln("ALARM:EMERGENCY_STOP_ACTIVATED");
+  lastAlarmReport = millis();
+  sendSerialPrint("ALARM:");
+  sendSerialPrintln(String(reason));
+}
+
+// 警報復歸: 緊急按鈕必須已放開才允許
+void resetFromAlarm() {
+  if (estopPressed()) {
+    sendSerialPrintln("ERR:ESTOP_STILL_PRESSED");
+    return;
+  }
+  digitalWrite(PIN_BUZZER, LOW);
+  buzzerActive = false;
+  digitalWrite(PIN_NG_CYLINDER, LOW);
+  sorterServo.write(SERVO_ANGLE_OK);
+  lastHeartbeatTime = millis();
+  currentState = STATE_IDLE;
+  setTowerLight(false, true, false);
+  sendSerialPrintln("STATUS:RESET_COMPLETE");
 }

@@ -10,7 +10,7 @@ from PyQt6.QtGui import (
     QPen,
     QPixmap,
 )
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget, QSizePolicy
 
 
 class VideoWidget(QWidget):
@@ -18,7 +18,8 @@ class VideoWidget(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setMinimumSize(960, 640)
+        self.setMinimumSize(320, 240)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._frame = None
         self._pixmap = None

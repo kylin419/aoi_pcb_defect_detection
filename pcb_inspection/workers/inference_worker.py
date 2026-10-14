@@ -73,6 +73,8 @@ class InferenceWorker(QObject):
     started = pyqtSignal()
     stopped = pyqtSignal()
     ros_command_received = pyqtSignal(str)
+    alarm_changed = pyqtSignal(bool, str)
+    arduino_line = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -84,6 +86,7 @@ class InferenceWorker(QObject):
         self.timer = None
 
         self.running = False
+        self.alarm_active = False
         
         self.initialized = False
         self.camera_ready = False
@@ -145,7 +148,10 @@ class InferenceWorker(QObject):
 
             self.log.emit("Connecting to Arduino Due Serial Bridge...")
             self.serial_bridge = ArduinoBridge(
-                feedback_callback=lambda msg: self.log.emit(f"Arduino: {msg}"),
+                feedback_callback=self.arduino_line.emit,   # reader thread -> queued to worker thread
+            )
+            self.arduino_line.connect(
+                self._handle_arduino_line, Qt.ConnectionType.QueuedConnection
             )
             if self.serial_bridge.connect():
                 self.log.emit("Arduino Due Serial Bridge Connected.")
@@ -171,6 +177,51 @@ class InferenceWorker(QObject):
 
         except Exception as e:
             self.error.emit(f"Initialization error: {e}")
+
+    # ------------------------------------------------------------------
+    # Emergency-stop alarm handling
+    # ------------------------------------------------------------------
+
+    def _handle_arduino_line(self, line: str):
+        if line == "ALARM:STILL_ACTIVE":
+            if not self.alarm_active:
+                self._enter_alarm("EMERGENCY_STOP_ACTIVATED")
+            return
+        self.log.emit(f"Arduino: {line}")
+        if line.startswith("ALARM:"):
+            self._enter_alarm(line[6:])
+        elif line in ("STATUS:RESET_COMPLETE", "STATUS:READY") and self.alarm_active:
+            self.alarm_active = False
+            self.alarm_changed.emit(False, "")
+            self.inspection_state.emit("IDLE")
+            self.log.emit("Alarm cleared. System is IDLE; press Start to resume.")
+        elif line == "ERR:ESTOP_STILL_PRESSED":
+            self.error.emit("Emergency stop is still pressed / E-stop circuit open. Release it first.")
+
+    def _enter_alarm(self, reason: str):
+        was_active = self.alarm_active
+        self.alarm_active = True
+        self.running = False
+        self.inspect_waiting = False
+        self._centering_active = False
+        self._centering_deadline = None
+        self._defect_detection_deadline = None
+        self.pcb_present = False
+        self._ng_hold = False
+        if not was_active:
+            self.error.emit(f"ALARM: {reason} - conveyor stopped. Release E-stop, then press Reset Alarm.")
+            self.stopped.emit()
+        self.alarm_changed.emit(True, reason)
+
+    @pyqtSlot()
+    def reset_alarm(self):
+        """Ask Arduino to clear the alarm; GUI clears only after Arduino confirms."""
+        if not self.serial_bridge:
+            self.alarm_active = False
+            self.alarm_changed.emit(False, "")
+            return
+        self.log.emit("Sending RESET to Arduino (clear alarm)...")
+        self.serial_bridge.send_reset()
 
     def _on_ros_command(self, cmd: str):
         """Dispatch ROS 2 external command safely to worker QThread."""
@@ -283,6 +334,10 @@ class InferenceWorker(QObject):
         if not self.camera_ready:
             self.inspection_state.emit("ERROR")
             self.error.emit("Cannot start conveyor inspection: camera is not available.")
+            return
+
+        if self.alarm_active:
+            self.error.emit("Cannot start: emergency-stop alarm is active. Reset the alarm first.")
             return
 
         if self.running:
@@ -672,8 +727,6 @@ class InferenceWorker(QObject):
         self.total_count = 0
         self.ok_count = 0
         self.ng_count = 0
-        if self.serial_bridge:
-            self.serial_bridge.send_reset()
         self.log.emit("Production yield statistics reset.")
         if self.last_result:
             self.dashboard_ready.emit(self._build_dashboard(0.0, self.last_result))

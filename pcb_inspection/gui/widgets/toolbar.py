@@ -22,6 +22,8 @@ class ToolBarWidget(QWidget):
     reload_clicked = pyqtSignal()
     settings_clicked = pyqtSignal()
     exit_clicked = pyqtSignal()
+    reset_alarm_clicked = pyqtSignal()
+    fullscreen_clicked = pyqtSignal()
 
     # ------------------------------------------------------------------
     # Initialization
@@ -84,6 +86,21 @@ class ToolBarWidget(QWidget):
             "Application Settings",
         )
 
+        self.alarm_btn = self.create_button(
+            "🚨 Reset Alarm",
+            "Clear emergency-stop alarm (release the E-stop button first)",
+        )
+        self.alarm_btn.setStyleSheet(
+            "QPushButton{background:#C0392B;color:white;font-weight:bold;}"
+            "QPushButton:hover{background:#E74C3C;}"
+        )
+        self.alarm_btn.setVisible(False)
+
+        self.fullscreen_btn = self.create_button(
+            "⛶ Fullscreen",
+            "Toggle fullscreen (F11, Esc to exit)",
+        )
+
         self.exit_btn = self.create_button(
             "✕ Exit",
             "Exit Application",
@@ -99,8 +116,10 @@ class ToolBarWidget(QWidget):
         layout.addWidget(self.save_btn)
         layout.addWidget(self.reset_stats_btn)
 
+        layout.addWidget(self.alarm_btn)
         layout.addStretch()
 
+        layout.addWidget(self.fullscreen_btn)
         layout.addWidget(self.reload_btn)
         layout.addWidget(self.settings_btn)
 
@@ -124,7 +143,7 @@ class ToolBarWidget(QWidget):
         button.setToolTip(tooltip)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setMinimumHeight(38)
-        button.setMinimumWidth(100)
+        button.setMinimumWidth(80)
         return button
 
     # ------------------------------------------------------------------
@@ -141,6 +160,8 @@ class ToolBarWidget(QWidget):
         self.reload_btn.clicked.connect(self.reload_clicked.emit)
         self.settings_btn.clicked.connect(self.settings_clicked.emit)
         self.exit_btn.clicked.connect(self.exit_clicked.emit)
+        self.alarm_btn.clicked.connect(self.reset_alarm_clicked.emit)
+        self.fullscreen_btn.clicked.connect(self.fullscreen_clicked.emit)
 
     # ------------------------------------------------------------------
     # State
@@ -158,3 +179,11 @@ class ToolBarWidget(QWidget):
 
         self.reload_btn.setEnabled(not running)
         self.settings_btn.setEnabled(not running)
+    def set_alarm(self, active: bool):
+        """Show Reset Alarm button and lock run controls while E-stop alarm is active."""
+        self.alarm_btn.setVisible(active)
+        if active:
+            self.start_btn.setEnabled(False)
+            self.trigger_btn.setEnabled(False)
+        else:
+            self.set_running(False)

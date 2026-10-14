@@ -17,7 +17,8 @@ class LogWidget(QPlainTextEdit):
 
         self.setReadOnly(True)
 
-        self.setMaximumHeight(180)
+        self.setMinimumHeight(70)
+        self.setMaximumHeight(260)
 
         self.document().setMaximumBlockCount(500)
 

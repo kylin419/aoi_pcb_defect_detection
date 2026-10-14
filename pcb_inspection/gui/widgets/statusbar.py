@@ -40,7 +40,9 @@ class StatusBarWidget(QStatusBar):
         self.engine = StatusItem("TensorRT")
         self.mode = StatusItem("Mode")
         self.inspection = StatusItem("Inspection")
+        self.safety = StatusItem("Safety")
 
+        self.addPermanentWidget(self.safety)
         self.addPermanentWidget(self.inspection)
         self.addPermanentWidget(self.ros)
         self.addPermanentWidget(self.camera)
@@ -52,6 +54,13 @@ class StatusBarWidget(QStatusBar):
         self.set_engine(False)
         self.set_mode("Standby")
         self.set_inspection_status("IDLE")
+        self.set_safety(False)
+
+    def set_safety(self, alarm: bool, reason: str = ""):
+        if alarm:
+            self.safety.set_state(f"ALARM {reason}".strip(), "#ff5555")
+        else:
+            self.safety.set_state("Normal", "#00ff7f")
 
     def set_inspection_status(self, state: str):
         labels = {
