@@ -116,6 +116,9 @@ class InferenceWorker(QObject):
         self.last_frame = None
         self.last_overlay = None
         self.last_result = None
+        # Result of the PCB currently in view; shown as a PASS/NG banner on
+        # the live stream until that PCB leaves the camera.
+        self._banner_result = None
 
         # Hardware monitor cache & timer throttle
         self.last_hw_time = 0.0
@@ -297,6 +300,7 @@ class InferenceWorker(QObject):
         self._ng_removed_at=None
         self._ng_absence_votes.clear()
         self._pcb_detection_votes.clear()
+        self._banner_result = None
         self.fps_tracker.reset()
         if self.serial_bridge:
             self.serial_bridge.send_start()
@@ -440,6 +444,7 @@ class InferenceWorker(QObject):
                     elif green_ratio < 0.025:
                         self.pcb_present = False
                         self._pcb_detection_votes.clear()
+                        self._banner_result = None
                         self.inspection_state.emit("SEARCHING")
                         self.log.emit("PCB left camera view. Ready for next PCB.")
 
@@ -457,6 +462,7 @@ class InferenceWorker(QObject):
                     self._ng_absence_votes.clear()
                     self.pcb_present = False
                     self._pcb_detection_votes.clear()
+                    self._banner_result = None
                     self.inspection_state.emit("SEARCHING")
                     self.log.emit("NG PCB removal confirmed; Arduino resumed the conveyor after a 2-second delay.")
                 else:
@@ -464,9 +470,27 @@ class InferenceWorker(QObject):
                     self.inspection_state.emit("RESUME_UNCONFIRMED")
                     self.log.emit("Arduino did not confirm conveyor resume; the system remains stopped.")
 
-            # Continue into defect inference after camera detection; only hold
-            # subsequent frames once inspection has completed.
+            # Inspection for this PCB is already finished (PASS / NG waiting for
+            # removal / fault). Do not run inference again, but keep the live
+            # preview streaming so the GUI doesn't freeze while the PCB leaves.
             if self.running and self.pcb_present and not self.inspect_waiting:
+                if is_new:
+                    fps = self.fps_tracker.update()
+                    if fps <= 0.0 and getattr(self.camera, "capture_fps", 0) > 0:
+                        fps = self.camera.capture_fps
+                    self.last_frame = frame
+                    if self._banner_result is not None:
+                        # Live frame + PASS/NG banner only (no stale boxes,
+                        # since the PCB is moving / being removed).
+                        display = draw_detections(
+                            frame,
+                            self._banner_result["detections"],
+                            draw_boxes=False,
+                        )
+                    else:
+                        display = frame
+                    self.frame_ready.emit(display)
+                    self.fps_ready.emit(fps)
                 return
 
             # While the conveyor is searching, keep the live preview moving
@@ -540,6 +564,7 @@ class InferenceWorker(QObject):
                     self.log.emit("Arduino did not acknowledge the inspection result; check controller state and serial connection.")
             # Inspection finished
             self.inspect_waiting=False        
+            self._banner_result = result
             self._ng_hold = not result["ok"] and result_acknowledged
             self._ng_removed_at = None
             self._ng_absence_votes.clear()

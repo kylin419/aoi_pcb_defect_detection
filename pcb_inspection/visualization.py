@@ -34,6 +34,7 @@ def draw_detections(
     inference_ms: float = None,
     fps: float = None,
     show_banner: bool = True,
+    draw_boxes: bool = True,
 ) -> np.ndarray:
     """Draw professional AOI inspection overlay on image frame."""
     if frame is None:
@@ -49,7 +50,7 @@ def draw_detections(
 
     defect_count = len(detections)
 
-    for det in detections:
+    for det in (detections if draw_boxes else []):
         x1, y1, x2, y2 = det["box"]
         raw_label = det["label"]
         score = det["score"]
